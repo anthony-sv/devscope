@@ -1,0 +1,132 @@
+<Window x:Class="Devscope.App.Views.WorkspaceEditorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+        xmlns:ctl="clr-namespace:Devscope.App.Controls"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:WorkspaceEditorViewModel}"
+        Title="Workspace" Width="900" Height="720" MinWidth="640" MinHeight="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+  <DockPanel Margin="20">
+    <!-- Footer -->
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" MinWidth="96" Margin="0,0,8,0" />
+        <Button Content="Save" Command="{Binding SaveCommand}" IsDefault="True" MinWidth="96" Style="{DynamicResource AccentButtonStyle}" />
+      </StackPanel>
+      <Button Content="Test paths" Command="{Binding TestPathsCommand}" DockPanel.Dock="Left" MinWidth="96"
+              ToolTip="Check that every path is reachable and count matching files" />
+      <TextBlock Text="{Binding ValidationError}" Foreground="{StaticResource ErrorBrush}" VerticalAlignment="Center" Margin="12,0" TextWrapping="Wrap" />
+    </DockPanel>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel>
+        <TextBlock Text="NAME" Style="{StaticResource SectionTitle}" />
+        <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Workspace name" />
+
+        <DockPanel Margin="0,20,0,6">
+          <Button DockPanel.Dock="Right" Content="Add environment" Command="{Binding AddEnvironmentCommand}" />
+          <StackPanel>
+            <TextBlock Text="ENVIRONMENTS" Style="{StaticResource SectionTitle}" Margin="0" />
+            <TextBlock Style="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                       Text="One entry per environment or cluster node. Paths can be local (D:\logs\app) or network shares (\\server2\logs\prod\app). Use Duplicate for cluster nodes." />
+          </StackPanel>
+        </DockPanel>
+
+        <ItemsControl ItemsSource="{Binding Environments}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource Card}" Margin="0,0,0,10">
+                <StackPanel>
+                  <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                      <Button Content="Add path" Command="{Binding AddSourceCommand}" />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" ToolTip="Duplicate environment"
+                              Command="{Binding DataContext.DuplicateEnvironmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE74D;" ToolTip="Remove environment"
+                              Command="{Binding DataContext.RemoveEnvironmentCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+                    </StackPanel>
+                    <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" FontWeight="SemiBold" MaxWidth="260" HorizontalAlignment="Left"
+                             AutomationProperties.Name="Environment name" ToolTip="e.g. local, test, beta-node1, prod-node2" />
+                  </DockPanel>
+
+                  <ItemsControl ItemsSource="{Binding Sources}" Margin="0,8,0,0">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Margin="0,4">
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="150" />
+                              <ColumnDefinition Width="Auto" />
+                              <ColumnDefinition Width="Auto" />
+                              <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox Grid.Column="0" Text="{Binding Path, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"
+                                     ctl:Behaviors.AcceptsPathDrop="True"
+                                     AutomationProperties.Name="Path" ToolTip="Log file or folder; local or \\server\share" />
+                            <TextBox Grid.Column="1" Text="{Binding IncludePatterns, UpdateSourceTrigger=PropertyChanged}" Margin="6,0,0,0"
+                                     FontFamily="{StaticResource MonoFont}" AutomationProperties.Name="File patterns"
+                                     ToolTip="File patterns used for folders, separated by ;" />
+                            <CheckBox Grid.Column="2" Content="Subfolders" IsChecked="{Binding Recursive}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                            <Button Grid.Column="3" Style="{StaticResource IconButton}" Content="&#xE838;" ToolTip="Pick folder"
+                                    Command="{Binding DataContext.BrowseSourceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                            <Button Grid.Column="4" Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="Remove path"
+                                    Command="{Binding DataContext.RemoveSourceCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}" />
+                          </Grid>
+                          <TextBlock Text="{Binding Status}" FontSize="11" Style="{StaticResource Muted}" Margin="2,2,0,0"
+                                     Visibility="{Binding Status, Converter={StaticResource VisibleWhen}}" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <DockPanel Margin="0,20,0,6">
+          <Button DockPanel.Dock="Right" Content="Add rule" Command="{Binding AddHighlightCommand}" />
+          <StackPanel>
+            <TextBlock Text="HIGHLIGHT RULES" Style="{StaticResource SectionTitle}" Margin="0" />
+            <TextBlock Style="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                       Text="Colour text that matters to you, e.g. an order id prefix, a user name, or a regex like Timeout\w*." />
+          </StackPanel>
+        </DockPanel>
+        <ItemsControl ItemsSource="{Binding Highlights}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid Margin="0,3">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="140" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBox Grid.Column="0" Text="{Binding Pattern, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"
+                         AutomationProperties.Name="Highlight pattern" />
+                <CheckBox Grid.Column="1" Content="Regex" IsChecked="{Binding IsRegex}" Margin="8,0" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="2" ItemsSource="{x:Static vm:WorkspaceEditorViewModel.HighlightColors}" SelectedItem="{Binding Color}"
+                          AutomationProperties.Name="Highlight colour">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel Orientation="Horizontal">
+                        <Border Width="28" Height="14" CornerRadius="3" Background="{Binding}" Margin="0,0,8,0" />
+                        <TextBlock Text="{Binding}" FontFamily="{StaticResource MonoFont}" FontSize="11" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button Grid.Column="3" Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="Remove rule"
+                        Command="{Binding DataContext.RemoveHighlightCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

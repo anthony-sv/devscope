@@ -1,0 +1,36 @@
+package com.acme.billing;
+
+import java.util.ArrayList;
+import java.util.List;
+
+public class InvoiceService {
+    private final List<String> posted = new ArrayList<>();
+    private int retries = 5;
+
+    public boolean post(String invoiceId) {
+        if (invoiceId == null) {
+            throw new IllegalArgumentException("invoiceId");
+        }
+        for (int i = 0; i < retries; i++) {
+            if (tryPost(invoiceId)) {
+                posted.add(invoiceId);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public int postedCount() {
+        return posted.size();
+    }
+
+    private boolean tryPost(String id) {
+        return !id.isBlank();
+    }
+
+    public static class Result {
+        public final String id;
+        public final boolean ok;
+        public Result(String id, boolean ok) { this.id = id; this.ok = ok; }
+    }
+}

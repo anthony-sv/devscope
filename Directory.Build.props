@@ -1,0 +1,20 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- CS1591: missing XML docs on internal-ish public members; we document the public surface of Core instead. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <Company>Devscope</Company>
+    <Product>Devscope</Product>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <!-- Symbols live inside the binaries, so a publish is a single exe. -->
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+</Project>

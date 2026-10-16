@@ -1,0 +1,4 @@
+* text=auto
+*.class binary
+*.jar binary
+*.png binary

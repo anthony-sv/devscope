@@ -1,0 +1,91 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:conv="clr-namespace:Devscope.App.Converters">
+
+  <conv:EnumToBrushConverter x:Key="BadgeBrush" Suffix="Brush" />
+  <conv:EnumToBrushConverter x:Key="RowBrush" Suffix="RowBrush" />
+  <conv:EnumToBrushConverter x:Key="LineBrush" Suffix="LineBrush" />
+  <conv:IndexToBrushConverter x:Key="IndexBrush" />
+  <conv:SeverityLabelConverter x:Key="SeverityLabel" />
+  <conv:TimestampConverter x:Key="Timestamp" />
+  <conv:BytesConverter x:Key="Bytes" />
+  <conv:VisibilityConverter x:Key="VisibleWhen" />
+  <conv:VisibilityConverter x:Key="CollapsedWhen" Invert="True" />
+
+  <!-- Surface for grouped content. Fluent resource keys fall back gracefully if a key is missing. -->
+  <Style x:Key="Card" TargetType="Border">
+    <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="Padding" Value="12" />
+  </Style>
+
+  <Style x:Key="SectionTitle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    <Setter Property="Margin" Value="0,0,0,6" />
+  </Style>
+
+  <Style x:Key="Muted" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+  </Style>
+
+  <Style x:Key="Icon" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <!-- Compact button with an icon glyph as content. Put the label in ToolTip. -->
+  <Style x:Key="IconButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+    <Setter Property="FontFamily" Value="{StaticResource IconFont}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="MinWidth" Value="32" />
+    <Setter Property="Margin" Value="4,0,0,0" />
+    <!-- Icon-only buttons: expose the tooltip text to screen readers and UI automation. -->
+    <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
+  </Style>
+
+  <Style x:Key="IconToggle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+    <Setter Property="AutomationProperties.Name" Value="{Binding ToolTip, RelativeSource={RelativeSource Self}}" />
+    <Setter Property="Padding" Value="8,6" />
+    <Setter Property="MinWidth" Value="32" />
+    <Setter Property="Margin" Value="4,0,0,0" />
+  </Style>
+
+  <!-- Filter chip: toggle with a coloured dot, label and count. -->
+  <Style x:Key="Chip" TargetType="ToggleButton" BasedOn="{StaticResource {x:Type ToggleButton}}">
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="Margin" Value="0,0,6,0" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style x:Key="Badge" TargetType="Border">
+    <Setter Property="CornerRadius" Value="4" />
+    <Setter Property="Padding" Value="6,1" />
+    <Setter Property="HorizontalAlignment" Value="Left" />
+    <Setter Property="VerticalAlignment" Value="Center" />
+  </Style>
+
+  <Style x:Key="BadgeText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="White" />
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style x:Key="MonoText" TargetType="TextBlock">
+    <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    <Setter Property="FontSize" Value="12.5" />
+  </Style>
+
+  <!-- Dense list rows for large virtualized lists. -->
+  <Style x:Key="DenseItem" TargetType="ListBoxItem" BasedOn="{StaticResource {x:Type ListBoxItem}}">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
+</ResourceDictionary>

@@ -1,0 +1,31 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!--
+    Semantic colours. Badges are solid; row tints are translucent so they work on both the
+    light and dark Fluent backgrounds. Everything else comes from the Fluent theme resources.
+  -->
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Cascadia Code, Consolas, Courier New</FontFamily>
+  <FontFamily x:Key="IconFont">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
+
+  <SolidColorBrush x:Key="FatalBrush" Color="#B10E1C" />
+  <SolidColorBrush x:Key="ErrorBrush" Color="#D13438" />
+  <SolidColorBrush x:Key="WarningBrush" Color="#C77C02" />
+  <SolidColorBrush x:Key="InfoBrush" Color="#0F6CBD" />
+  <SolidColorBrush x:Key="DebugBrush" Color="#6E6E6E" />
+  <SolidColorBrush x:Key="TraceBrush" Color="#8A8A8A" />
+  <SolidColorBrush x:Key="UnknownBrush" Color="Transparent" />
+
+  <SolidColorBrush x:Key="FatalRowBrush" Color="#40D13438" />
+  <SolidColorBrush x:Key="ErrorRowBrush" Color="#24D13438" />
+  <SolidColorBrush x:Key="WarningRowBrush" Color="#1FF7A600" />
+
+  <SolidColorBrush x:Key="AddedBrush" Color="#2DA44E" />
+  <SolidColorBrush x:Key="RemovedBrush" Color="#CF222E" />
+  <SolidColorBrush x:Key="ModifiedBrush" Color="#BF8700" />
+  <SolidColorBrush x:Key="UnchangedBrush" Color="#8A8A8A" />
+
+  <SolidColorBrush x:Key="InsertedLineBrush" Color="#332DA44E" />
+  <SolidColorBrush x:Key="DeletedLineBrush" Color="#33CF222E" />
+  <SolidColorBrush x:Key="ModifiedLineBrush" Color="#33BF8700" />
+  <SolidColorBrush x:Key="ImaginaryLineBrush" Color="#14808080" />
+</ResourceDictionary>
