@@ -65,6 +65,17 @@ Needs **Java 17+** and the Vineflower jar:
 
 The build copies the jar to `tools\` next to `Devscope.exe`, where it is found automatically. Java is found through `JAVA_HOME` or `PATH`. Either one can be overridden in the "Java decompiler" section of the EAR diff page.
 
+## Download
+
+Grab the latest build from [Releases](https://github.com/anthony-sv/devscope/releases): unzip and run `Devscope.exe`. No .NET install is needed.
+
+To cut a release, push a version tag. GitHub Actions tests, publishes and attaches the zip:
+
+`powershell
+git tag v0.2.0
+git push origin v0.2.0
+`
+
 ## Distribute
 
 ```powershell

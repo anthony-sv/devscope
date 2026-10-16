@@ -1,0 +1,85 @@
+# Builds a self-contained Windows release when a version tag is pushed:
+#   git tag v0.1.0 && git push origin v0.1.0
+# The resulting exe bundles the .NET runtime, so target machines need no .NET install.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      # Vineflower needs Java 17+; the decompiler tests run against a real JVM.
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Fetch Vineflower
+        shell: pwsh
+        run: ./tools/Get-Vineflower.ps1
+
+      - name: Test
+        run: dotnet test --solution Devscope.slnx -c Release
+
+      - name: Publish
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          dotnet publish src/Devscope.App -c Release -o artifacts/publish -p:Version=$version
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $publish = 'artifacts/publish'
+
+          # Apache-2.0 requires shipping the licence alongside the redistributed jar.
+          $jar = Get-ChildItem "$publish/tools" -Filter 'vineflower-*.jar' | Select-Object -First 1
+          $vfVersion = $jar.BaseName -replace '^vineflower-', ''
+          Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/Vineflower/vineflower/$vfVersion/LICENSE.md" -OutFile "$publish/tools/VINEFLOWER-LICENSE.md"
+          @"
+          Devscope $version bundles:
+
+          - Vineflower $vfVersion (tools/$($jar.Name)), Apache License 2.0, https://github.com/Vineflower/vineflower
+            Licence text: tools/VINEFLOWER-LICENSE.md
+          - The .NET runtime (inside Devscope.exe), MIT licence, https://github.com/dotnet/runtime
+          "@ | Set-Content "$publish/THIRD-PARTY-NOTICES.txt" -Encoding utf8
+
+          Compress-Archive -Path "$publish/*" -DestinationPath "artifacts/Devscope-$version-win-x64.zip"
+          Copy-Item "$publish/Devscope.exe" "artifacts/Devscope-$version-win-x64.exe"
+          Get-FileHash artifacts/Devscope-*.zip, artifacts/Devscope-*.exe -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content artifacts/SHA256SUMS.txt -Encoding ascii
+
+      - name: Create GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          $notes = @"
+          ## Download
+
+          - **Devscope-$version-win-x64.zip**: recommended. ``Devscope.exe`` plus the Vineflower jar for decompiling ``.class`` diffs (needs Java 17+ on the machine).
+          - **Devscope-$version-win-x64.exe**: just the app, without the decompiler.
+
+          No .NET install is needed: the runtime is bundled. Unzip anywhere (a local folder or a network share) and run ``Devscope.exe``.
+          The exe is not code-signed, so Windows SmartScreen may ask you to confirm the first time (More info → Run anyway).
+          "@
+          gh release create '${{ github.ref_name }}' `
+            "artifacts/Devscope-$version-win-x64.zip" `
+            "artifacts/Devscope-$version-win-x64.exe" `
+            artifacts/SHA256SUMS.txt `
+            --title "Devscope $version" --notes $notes
