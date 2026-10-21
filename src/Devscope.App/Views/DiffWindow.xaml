@@ -1,0 +1,80 @@
+<Window x:Class="Devscope.App.Views.DiffWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+        xmlns:views="clr-namespace:Devscope.App.Views"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:EarDiffViewModel}"
+        Title="{Binding ActiveDocument.Entry.Name, StringFormat='{}{0} – Devscope diff', FallbackValue='Devscope diff'}"
+        Width="1400" Height="900" MinWidth="640" MinHeight="400"
+        WindowStartupLocation="CenterScreen" WindowState="Maximized">
+  <Window.InputBindings>
+    <KeyBinding Key="W" Modifiers="Control" Command="{Binding CloseDocumentCommand}" CommandParameter="{Binding ActiveDocument}" />
+    <KeyBinding Key="F4" Modifiers="Control" Command="{Binding CloseDocumentCommand}" CommandParameter="{Binding ActiveDocument}" />
+  </Window.InputBindings>
+
+  <Window.Resources>
+    <!--
+      Tabs like an editor's. The open tab gets a filled header, bold text and a thick accent bar, so it stands out
+      without relying on colour alone.
+    -->
+    <Style x:Key="DocumentTab" TargetType="TabItem">
+      <Setter Property="AutomationProperties.Name" Value="{Binding Entry.Name}" />
+      <Setter Property="ToolTip" Value="{Binding Entry.Path}" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="TabItem">
+            <Grid Margin="0,0,2,0">
+              <Border x:Name="Fill" CornerRadius="6,6,0,0" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}"
+                      BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1,1,1,0" />
+              <Border x:Name="Hover" CornerRadius="6,6,0,0" Background="#808080" Opacity="0.10" Visibility="Collapsed" />
+              <ContentPresenter ContentSource="Header" Margin="10,6,4,8" />
+              <Border x:Name="Bar" Height="3" VerticalAlignment="Bottom" Background="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="False">
+                <Setter TargetName="Fill" Property="Background" Value="Transparent" />
+                <Setter TargetName="Fill" Property="BorderThickness" Value="0" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Bar" Property="Visibility" Value="Visible" />
+                <Setter Property="FontWeight" Value="SemiBold" />
+                <Setter Property="Panel.ZIndex" Value="1" />
+              </Trigger>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Hover" Property="Visibility" Value="Visible" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <TabControl ItemsSource="{Binding OpenDocuments}" SelectedItem="{Binding ActiveDocument}"
+              ItemContainerStyle="{StaticResource DocumentTab}" Padding="0" Margin="8,8,8,8"
+              AutomationProperties.Name="Open files">
+    <TabControl.ItemTemplate>
+      <DataTemplate DataType="{x:Type vm:DiffDocumentViewModel}">
+        <StackPanel Orientation="Horizontal">
+          <Ellipse Width="9" Height="9" Margin="0,0,8,0" VerticalAlignment="Center"
+                   Fill="{Binding Entry.Status, Converter={StaticResource BadgeBrush}}" />
+          <TextBlock Text="{Binding Entry.Name}" FontSize="13" VerticalAlignment="Center" />
+          <Button Style="{StaticResource IconButton}" Content="&#xE711;" FontSize="10" Padding="4" MinWidth="0" Margin="8,0,0,0"
+                  ToolTip="Close (Ctrl+W)" Focusable="False"
+                  Command="{Binding DataContext.CloseDocumentCommand, RelativeSource={RelativeSource AncestorType=TabControl}}"
+                  CommandParameter="{Binding}" />
+        </StackPanel>
+      </DataTemplate>
+    </TabControl.ItemTemplate>
+    <TabControl.ContentTemplate>
+      <DataTemplate DataType="{x:Type vm:DiffDocumentViewModel}">
+        <Border Style="{StaticResource Card}" Padding="0" CornerRadius="0,8,8,8">
+          <views:DiffDocumentView />
+        </Border>
+      </DataTemplate>
+    </TabControl.ContentTemplate>
+  </TabControl>
+</Window>

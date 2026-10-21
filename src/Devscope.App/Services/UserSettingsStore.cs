@@ -39,6 +39,9 @@ public sealed class UserSettings
 
     /// <summary>Rescan the compared EARs when they change on disk.</summary>
     public bool AutoRefresh { get; set; }
+
+    /// <summary>Zoom of the diff text (1 = 100%), changed with Ctrl+mouse wheel.</summary>
+    public double DiffZoom { get; set; } = 1;
 }
 
 public interface IUserSettingsStore

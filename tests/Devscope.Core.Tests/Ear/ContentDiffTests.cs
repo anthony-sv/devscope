@@ -19,6 +19,52 @@ public sealed class ContentDiffTests
         Assert.Contains(result.Lines, l => l.LeftText == "a=1" && !l.IsChange);
     }
 
+    [Theory]
+    [InlineData("a=1\r\nb=2\r\n", "a=1\nb=2\n", "Identical text · the bytes differ only in line endings (CRLF → LF)")]
+    [InlineData("a=1\nb=2\n", "a=1\r\nb=2\n", "Identical text · the bytes differ only in line endings (LF → mixed)")]
+    [InlineData("﻿a=1\nb=2\n", "a=1\nb=2\n", "Identical text · the bytes differ only in the UTF-8 byte order mark (removed)")]
+    [InlineData("a=1\nb=2\n", "﻿a=1\r\nb=2\r\n", "Identical text · the bytes differ only in the UTF-8 byte order mark (added) and line endings (LF → CRLF)")]
+    public void Build_SameTextDifferentBytes_SaysWhatDiffers(string left, string right, string expected)
+    {
+        // These rows are Modified (their CRC differs) although the line diff is empty, so the summary says why.
+        var result = ContentDiff.Build("config.properties", Encoding.UTF8.GetBytes(left), Encoding.UTF8.GetBytes(right));
+
+        Assert.False(result.Stats.HasChanges);
+        Assert.Equal(expected, result.Summary);
+    }
+
+    [Theory]
+    [InlineData("a=1\r\nb=2\r\n", "a=1\nb=2\n", true)]
+    [InlineData("﻿a=1\rb=2\r", "a=1\nb=2\n", true)]
+    [InlineData("a=1\nb=2\n", "a=1\nb=2", false)]
+    [InlineData("a=1\nb=2\n", "a=1\nb=2 \n", false)]
+    [InlineData("a=1\nb=2\n", "a=1\nb=3\n", false)]
+    public void HasSameText_AgreesWithTheLineDiff(string left, string right, bool expected)
+    {
+        // Rows sorted into "identical text" must never show + or − once opened, and vice versa.
+        var (l, r) = (Encoding.UTF8.GetBytes(left), Encoding.UTF8.GetBytes(right));
+
+        Assert.Equal(expected, ContentDiff.HasSameText("config.properties", l, r));
+        Assert.Equal(!expected, ContentDiff.Build("config.properties", l, r).Stats.HasChanges);
+    }
+
+    [Fact]
+    public void HasSameText_OneSideMissingOrBinary_IsFalse()
+    {
+        byte[] binary = [0xCA, 0xFE, 0x00, 0x01];
+
+        Assert.False(ContentDiff.HasSameText("a.properties", Encoding.UTF8.GetBytes("a"), null));
+        Assert.False(ContentDiff.HasSameText("lib.bin", binary, binary));
+    }
+
+    [Fact]
+    public void Build_IdenticalBytes_SaysIdenticalTextOnly()
+    {
+        var bytes = Encoding.UTF8.GetBytes("a=1\r\n");
+
+        Assert.Equal("Identical text", ContentDiff.Build("config.properties", bytes, bytes).Summary);
+    }
+
     [Fact]
     public void Build_ModifiedAndInsertedLines_CountsLikeGit()
     {

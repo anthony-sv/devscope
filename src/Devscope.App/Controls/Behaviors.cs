@@ -20,6 +20,20 @@ public static class Behaviors
     public static readonly DependencyProperty AcceptsPathDropProperty = DependencyProperty.RegisterAttached(
         "AcceptsPathDrop", typeof(bool), typeof(Behaviors), new PropertyMetadata(false, OnAcceptsPathDropChanged));
 
+    /// <summary>
+    /// Index of the <see cref="GridView"/> column that takes the width the other columns leave, so a narrow list
+    /// never pushes its last columns out of view.
+    /// </summary>
+    public static readonly DependencyProperty FillColumnProperty = DependencyProperty.RegisterAttached(
+        "FillColumn", typeof(int), typeof(Behaviors), new PropertyMetadata(-1, OnFillColumnChanged));
+
+    /// <summary>Narrowest the <see cref="FillColumnProperty"/> column gets; below that the list scrolls sideways.</summary>
+    public const double MinFillColumnWidth = 160;
+
+    public static int GetFillColumn(DependencyObject element) => (int)element.GetValue(FillColumnProperty);
+
+    public static void SetFillColumn(DependencyObject element, int value) => element.SetValue(FillColumnProperty, value);
+
     public static bool GetAutoScrollToEnd(DependencyObject element) => (bool)element.GetValue(AutoScrollToEndProperty);
 
     public static void SetAutoScrollToEnd(DependencyObject element, bool value) => element.SetValue(AutoScrollToEndProperty, value);
@@ -92,6 +106,36 @@ public static class Behaviors
         {
             list.ScrollIntoView(item);
         }
+    }
+
+    private static void OnFillColumnChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not ListView list)
+        {
+            return;
+        }
+
+        list.SizeChanged -= OnFillListSizeChanged;
+        if ((int)e.NewValue >= 0)
+        {
+            list.SizeChanged += OnFillListSizeChanged;
+        }
+    }
+
+    private static void OnFillListSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        var list = (ListView)sender;
+        var index = GetFillColumn(list);
+        if (list.View is not GridView view || index >= view.Columns.Count)
+        {
+            return;
+        }
+
+        var others = view.Columns.Where((_, i) => i != index).Sum(c => double.IsNaN(c.Width) ? c.ActualWidth : c.Width);
+
+        // Leaves room for the vertical scroll bar and the borders, so no horizontal scroll bar appears.
+        var available = list.ActualWidth - others - SystemParameters.VerticalScrollBarWidth - 8;
+        view.Columns[index].Width = Math.Max(MinFillColumnWidth, available);
     }
 
     private static void OnAcceptsPathDropChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

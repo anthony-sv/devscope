@@ -9,10 +9,19 @@ using Devscope.Core.Ear;
 
 namespace Devscope.App.ViewModels;
 
+/// <summary>Columns the EAR diff list can be sorted by.</summary>
+public enum EarDiffSortKey
+{
+    Path,
+    Status,
+    Left,
+    Right,
+}
+
 /// <summary>
 /// Feature 1: compare two EARs (or exploded deployments) entry by entry, including nested WARs/JARs.
 /// Changed classes are decompiled in the background, and the comparison can refresh itself when either side
-/// is redeployed.
+/// is redeployed. A single click previews a file's diff; a double click opens it in a tab of the diff window.
 /// </summary>
 public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposable
 {
@@ -28,16 +37,20 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     private readonly IUserSettingsStore _settings;
     private readonly IJavaDecompiler _decompiler;
     private readonly SynchronizationContext? _ui;
+    private readonly DiffZoom _zoom;
 
     // Decompiled source keyed by root, path, and the size and CRC of the class and its inner classes,
     // so entries survive an auto-refresh unless their bytes changed.
     private readonly ConcurrentDictionary<string, Task<string>> _decompiled = new(StringComparer.Ordinal);
-    private CancellationTokenSource? _detailCts;
+
+    // Modified files whose text is identical (only line endings, a byte order mark or compiler output differ), keyed
+    // by path and both sides' size and CRC (see SameTextKey) so the verdict survives refreshes. UI thread only.
+    private readonly HashSet<string> _sameText = new(StringComparer.Ordinal);
+    private Dictionary<string, EarDiffRow> _rowsByPath = new(StringComparer.Ordinal);
     private CancellationTokenSource? _prefetchCts;
     private CancellationTokenSource? _refreshCts;
     private DeploymentWatcher? _watcher;
     private ClassIndex? _classIndex;
-    private int[] _changeRows = [];
     private DecompilerSetup? _decompilerSetup;
     private bool _restoringSelection;
     private bool _isRefreshing;
@@ -61,13 +74,15 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         _rightPath = settings.Current.RightEarPath;
         _autoRefresh = settings.Current.AutoRefresh;
         _ui = SynchronizationContext.Current;
+        _zoom = new DiffZoom(settings);
+        Preview = new DiffDocumentViewModel(LoadDiffAsync, _zoom);
         _settings.Changed += OnSettingsChanged;
         LocateDecompiler();
     }
 
     public string Title => "EAR diff";
 
-    public string Glyph => "";
+    public string Glyph => "";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CompareCommand))]
@@ -83,13 +98,36 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasResult))]
     [NotifyCanExecuteChangedFor(nameof(ExportCommand))]
+    [NotifyPropertyChangedFor(nameof(ChangedCount))]
     private EarComparison? _comparison;
 
     [ObservableProperty]
-    private ObservableCollection<EarDiffEntry> _rows = [];
+    private ObservableCollection<EarDiffRow> _rows = [];
+
+    /// <summary>The row whose diff the preview pane shows.</summary>
+    [ObservableProperty]
+    private EarDiffRow? _selectedRow;
+
+    /// <summary>The diff of <see cref="SelectedRow"/>, shown next to the list.</summary>
+    public DiffDocumentViewModel Preview { get; }
+
+    /// <summary>Tabs of the diff window, opened by double-clicking rows.</summary>
+    public ObservableCollection<DiffDocumentViewModel> OpenDocuments { get; } = [];
+
+    [ObservableProperty]
+    private DiffDocumentViewModel? _activeDocument;
 
     [ObservableProperty]
     private string _searchText = string.Empty;
+
+    [ObservableProperty]
+    private bool _showModified = true;
+
+    [ObservableProperty]
+    private bool _showAdded = true;
+
+    [ObservableProperty]
+    private bool _showRemoved = true;
 
     [ObservableProperty]
     private bool _showUnchanged;
@@ -97,20 +135,49 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     [ObservableProperty]
     private bool _showArchives;
 
+    /// <summary>List modified files whose text is identical too (tagged "same text"); hidden by default.</summary>
     [ObservableProperty]
-    private EarDiffEntry? _selectedRow;
+    [NotifyPropertyChangedFor(nameof(SameTextHint), nameof(SameTextAction))]
+    private bool _showSameText;
+
+    /// <summary>Modified files (not archive rows) of the comparison whose text is identical.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ChangedCount), nameof(SameTextHint))]
+    private int _sameTextCount;
+
+    /// <summary>Modified files whose content actually differs.</summary>
+    public int ChangedCount => (Comparison?.Modified ?? 0) - SameTextCount;
+
+    public string SameTextHint
+    {
+        get
+        {
+            var one = SameTextCount == 1;
+            var files = one ? "1 modified file has" : $"{SameTextCount:N0} modified files have";
+            const string why = "identical text (only line endings, a byte order mark or compiler output differ)";
+            return ShowSameText
+                ? $"{files} {why}; {(one ? "it is" : "they are")} tagged “same text” in the list."
+                : $"{files} {why} and {(one ? "is" : "are")} hidden.";
+        }
+    }
+
+    public string SameTextAction => ShowSameText ? "Hide them" : "Show them";
 
     [ObservableProperty]
-    private bool _isLoadingDetail;
+    [NotifyPropertyChangedFor(nameof(PathHeader), nameof(StatusHeader), nameof(LeftHeader), nameof(RightHeader))]
+    private EarDiffSortKey _sortKey;
 
     [ObservableProperty]
-    private ContentDiffResult? _detail;
+    [NotifyPropertyChangedFor(nameof(PathHeader), nameof(StatusHeader), nameof(LeftHeader), nameof(RightHeader))]
+    private bool _sortDescending;
 
-    [ObservableProperty]
-    private SideBySideLine? _selectedLine;
+    public string PathHeader => Header("File", EarDiffSortKey.Path);
 
-    [ObservableProperty]
-    private string _loadingText = string.Empty;
+    public string StatusHeader => Header("Status", EarDiffSortKey.Status);
+
+    public string LeftHeader => Header("Left", EarDiffSortKey.Left);
+
+    public string RightHeader => Header("Right", EarDiffSortKey.Right);
 
     [ObservableProperty]
     private string _decompilerStatus = string.Empty;
@@ -135,15 +202,32 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
 
     partial void OnSearchTextChanged(string value) => ApplyRowFilter();
 
+    partial void OnShowModifiedChanged(bool value) => ApplyRowFilter();
+
+    partial void OnShowAddedChanged(bool value) => ApplyRowFilter();
+
+    partial void OnShowRemovedChanged(bool value) => ApplyRowFilter();
+
     partial void OnShowUnchangedChanged(bool value) => ApplyRowFilter();
 
     partial void OnShowArchivesChanged(bool value) => ApplyRowFilter();
 
-    partial void OnSelectedRowChanged(EarDiffEntry? value)
+    partial void OnShowSameTextChanged(bool value) => ApplyRowFilter();
+
+    partial void OnSelectedRowChanged(EarDiffRow? value)
     {
         if (!_restoringSelection)
         {
-            _ = LoadDetailAsync(value);
+            ShowPreview(value?.Entry);
+        }
+    }
+
+    private void ShowPreview(EarDiffEntry? entry)
+    {
+        // Records compare by value: a refreshed row whose bytes did not change keeps its open diff.
+        if (entry != Preview.Entry)
+        {
+            _ = Preview.LoadAsync(entry);
         }
     }
 
@@ -156,6 +240,28 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
 
     [RelayCommand]
     private void OpenSettings() => _dialogs.ShowSettings();
+
+    [RelayCommand]
+    private void ToggleSameText() => ShowSameText = !ShowSameText;
+
+    [RelayCommand]
+    private void SortBy(EarDiffSortKey key)
+    {
+        if (SortKey == key)
+        {
+            SortDescending = !SortDescending;
+        }
+        else
+        {
+            SortKey = key;
+            SortDescending = false;
+        }
+
+        ApplyRowFilter();
+    }
+
+    private string Header(string label, EarDiffSortKey key) =>
+        SortKey == key ? $"{label} {(SortDescending ? "▼" : "▲")}" : label;
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
@@ -173,6 +279,10 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         {
             _decompilerSetup = setup;
             _decompiled.Clear();
+
+            // Class verdicts came from the old decompiler; text verdicts are recomputed on the next comparison.
+            _sameText.RemoveWhere(key => IsClassFile(key[..key.IndexOf('|', StringComparison.Ordinal)]));
+            ApplyRowFilter();
         }
 
         DecompilerStatus = message;
@@ -206,10 +316,13 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         _settings.Save();
 
         StopBackgroundWork();
+        CloseAllDocuments();
         Comparison = null;
         _decompiled.Clear();
         Rows = [];
-        Detail = null;
+        _rowsByPath = new(StringComparer.Ordinal);
+        SameTextCount = 0;
+        _ = Preview.LoadAsync(null);
         StatusText = "Scanning…";
 
         var scanned = new Dictionary<string, int>();
@@ -222,6 +335,7 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         try
         {
             var result = await _comparer.CompareAsync(left, right, progress, cancellationToken);
+            _sameText.UnionWith((await FindSameTextFilesAsync(result, cancellationToken)).Select(SameTextKey));
             ShowComparison(result, previousRow: null);
             StatusText = Summarize(result);
             StartPrefetch(result);
@@ -240,29 +354,14 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
 
     private static string Summarize(EarComparison result) => result.Added + result.Removed + result.Modified == 0
         ? $"Identical content ({result.Unchanged:N0} files) · {result.Elapsed.TotalSeconds:N1}s"
-        : $"{result.Modified:N0} modified · {result.Added:N0} added · {result.Removed:N0} removed · {result.Unchanged:N0} unchanged · {result.Elapsed.TotalSeconds:N1}s";
+        // The status chips carry the counts, and keep them current as identical-text classes are found.
+        : $"Compared {result.Added + result.Removed + result.Modified + result.Unchanged:N0} files · {result.Elapsed.TotalSeconds:N1}s";
 
     /// <summary>Shows a comparison, keeping the selected row (and its open diff, if that file did not change).</summary>
     private void ShowComparison(EarComparison result, EarDiffEntry? previousRow)
     {
-        EarDiffEntry? match;
-        _restoringSelection = true;
-        try
-        {
-            Comparison = result;
-            ApplyRowFilter();
-            match = previousRow is null ? null : Rows.FirstOrDefault(r => r.Path == previousRow.Path);
-            SelectedRow = match;
-        }
-        finally
-        {
-            _restoringSelection = false;
-        }
-
-        if (match != previousRow)
-        {
-            _ = LoadDetailAsync(match);
-        }
+        Comparison = result;
+        RebuildRows(previousRow is null ? null : result.Entries.FirstOrDefault(e => e.Path == previousRow.Path));
     }
 
     private void StopBackgroundWork()
@@ -334,9 +433,11 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
                 _refreshPending = false;
                 StatusText = "Change detected on disk, rescanning…";
                 var result = await _comparer.CompareAsync(previous.LeftRoot, previous.RightRoot, progress: null, ct);
+                _sameText.UnionWith((await FindSameTextFilesAsync(result, ct)).Select(SameTextKey));
                 ct.ThrowIfCancellationRequested();
 
-                ShowComparison(result, SelectedRow);
+                ShowComparison(result, Preview.Entry);
+                RefreshDocuments(result);
                 StatusText = $"{Summarize(result)} · refreshed {DateTime.Now:T}";
                 StartPrefetch(result);
                 previous = result;
@@ -358,6 +459,24 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         }
     }
 
+    /// <summary>Reloads tabs whose file changed in a refresh, and closes those whose file is gone.</summary>
+    private void RefreshDocuments(EarComparison comparison)
+    {
+        foreach (var document in OpenDocuments.ToList())
+        {
+            var entry = document.Entry is { } old ? comparison.Entries.FirstOrDefault(e => e.Path == old.Path) : null;
+            if (entry is null || entry.IsArchive)
+            {
+                CloseDocument(document);
+            }
+            else if (entry != document.Entry)
+            {
+                _ = document.LoadAsync(entry);
+            }
+        }
+    }
+
+    /// <summary>Starts decompiling changed classes in the background, which also finds classes with identical source.</summary>
     private void StartPrefetch(EarComparison comparison)
     {
         _prefetchCts?.Cancel();
@@ -373,26 +492,95 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         _ = PrefetchAsync(comparison, setup, _prefetchCts.Token);
     }
 
+    /// <summary>
+    /// Finds modified text files that differ only in line endings or a byte order mark. Runs before the rows are
+    /// shown, so they never move once listed.
+    /// </summary>
+    private async Task<IReadOnlyCollection<EarDiffEntry>> FindSameTextFilesAsync(EarComparison comparison, CancellationToken ct)
+    {
+        var candidates = comparison.Entries
+            .Where(e => e.Status == DiffStatus.Modified && !e.IsArchive && !IsClassFile(e.Path)
+                && Math.Max(e.Left!.Length, e.Right!.Length) <= ContentDiff.MaxTextBytes && !_sameText.Contains(SameTextKey(e)))
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return [];
+        }
+
+        StatusText = $"Checking {candidates.Count:N0} changed text files…";
+        var found = new ConcurrentBag<EarDiffEntry>();
+        var options = new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = ct };
+        await Parallel.ForEachAsync(candidates, options, async (entry, token) =>
+        {
+            try
+            {
+                var left = await _scanner.ReadEntryAsync(comparison.LeftRoot, entry.Path, token);
+                var right = await _scanner.ReadEntryAsync(comparison.RightRoot, entry.Path, token);
+                if (ContentDiff.HasSameText(entry.Path, left, right))
+                {
+                    found.Add(entry);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                // Stays with the changed files; opening it reports the error.
+            }
+        });
+
+        return found;
+    }
+
     /// <summary>Decompiles every changed class, batched per archive so each Java process handles many classes.</summary>
     private async Task PrefetchAsync(EarComparison comparison, DecompilerSetup setup, CancellationToken ct)
     {
-        // Outer classes only: inner classes are decompiled together with them.
+        // Outer classes only: inner classes are decompiled together with them. A class whose only change is in an
+        // inner class (Foo$1) is decompiled too, so its rows can be checked for identical source.
+        var byPath = comparison.Entries.ToDictionary(e => e.Path, StringComparer.Ordinal);
+        var outers = comparison.Entries
+            .Where(e => !e.IsArchive && e.Status != DiffStatus.Unchanged && IsClassFile(e.Path))
+            .Select(e => byPath.GetValueOrDefault(OuterClassPath(e.Path)))
+            .OfType<EarDiffEntry>()
+            .Distinct()
+            .ToList();
+
         var work = new List<ClassGroupWork>();
-        foreach (var entry in comparison.Entries.Where(e => !e.IsArchive && e.Status != DiffStatus.Unchanged && IsClassFile(e.Path) && !e.Name.Contains('$')))
+        var pairs = new Dictionary<string, ClassPair>(StringComparer.Ordinal);
+        foreach (var entry in outers)
         {
-            foreach (var isLeft in (bool[])[true, false])
+            var left = entry.Left is null ? null : FindClassGroup(comparison, isLeft: true, entry);
+            var right = entry.Right is null ? null : FindClassGroup(comparison, isLeft: false, entry);
+            work.AddRange(new[] { left, right }.OfType<ClassGroupWork>().Where(g => !_decompiled.ContainsKey(g.Key)));
+
+            // Same decompiled source on both sides: the outer class and its inner classes have the same text.
+            if (left is not null && right is not null)
             {
-                if ((isLeft ? entry.Left : entry.Right) is not null && FindClassGroup(comparison, isLeft, entry) is var group && !_decompiled.ContainsKey(group.Key))
+                var modified = left.RelatedPaths.Union(right.RelatedPaths)
+                    .Select(p => byPath[p])
+                    .Where(e => e.Status == DiffStatus.Modified)
+                    .ToList();
+                if (modified.Count > 0)
                 {
-                    work.Add(group);
+                    var pair = new ClassPair(left.Key, right.Key, modified);
+                    pairs[left.Key] = pair;
+                    pairs[right.Key] = pair;
                 }
             }
         }
 
+        // Pairs already decompiled (cached from an earlier pass) are tagged right away.
+        MarkSameText(comparison, pairs.Values.Distinct().Where(HasSameSource).SelectMany(p => p.Modified));
         if (work.Count == 0)
         {
             return;
         }
+
+        var sameText = new Progress<IReadOnlyList<EarDiffEntry>>(entries =>
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                MarkSameText(comparison, entries);
+            }
+        });
 
         // Within one archive every path is unique, so a batch never has two classes writing the same file.
         var batches = work.GroupBy(g => (g.Root, g.Entry.Container)).SelectMany(g => g.Chunk(PrefetchBatchSize)).ToList();
@@ -438,6 +626,18 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
                             Interlocked.Increment(ref failed);
                         }
                     }
+
+                    var same = batch
+                        .Select(item => pairs.GetValueOrDefault(item.Key))
+                        .OfType<ClassPair>()
+                        .Distinct()
+                        .Where(HasSameSource)
+                        .SelectMany(p => p.Modified)
+                        .ToList();
+                    if (same.Count > 0)
+                    {
+                        ((IProgress<IReadOnlyList<EarDiffEntry>>)sameText).Report(same);
+                    }
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or IOException or UnauthorizedAccessException or InvalidDataException)
                 {
@@ -473,10 +673,10 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
             return;
         }
 
-        var sb = new StringBuilder("status,path,left_bytes,right_bytes\r\n");
+        var sb = new StringBuilder("status,path,left_bytes,right_bytes,identical_text\r\n");
         foreach (var entry in Comparison.Entries.Where(e => !e.IsArchive && e.Status != DiffStatus.Unchanged))
         {
-            sb.Append(CultureInfo.InvariantCulture, $"{entry.Status},\"{entry.Path.Replace("\"", "\"\"", StringComparison.Ordinal)}\",{entry.Left?.Length},{entry.Right?.Length}\r\n");
+            sb.Append(CultureInfo.InvariantCulture, $"{entry.Status},\"{entry.Path.Replace("\"", "\"\"", StringComparison.Ordinal)}\",{entry.Left?.Length},{entry.Right?.Length},{(IsSameText(entry) ? "yes" : "no")}\r\n");
         }
 
         await File.WriteAllTextAsync(file, sb.ToString());
@@ -484,35 +684,82 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     }
 
     [RelayCommand]
-    private void CopyPath(EarDiffEntry? entry)
+    private void CopyPath(EarDiffRow? row)
     {
-        if (entry is not null)
+        if (row is not null)
         {
-            _shell.CopyToClipboard(entry.Path);
+            _shell.CopyToClipboard(row.Path);
         }
     }
 
+    /// <summary>Opens a row (the previewed one by default) in a tab of the diff window, or switches to its tab.</summary>
     [RelayCommand]
-    private void NextChange() => MoveToChange(forward: true);
-
-    [RelayCommand]
-    private void PreviousChange() => MoveToChange(forward: false);
-
-    private void MoveToChange(bool forward)
+    private void OpenInWindow(EarDiffRow? row)
     {
-        if (Detail is not { IsText: true } detail || _changeRows.Length == 0)
+        var entry = row?.Entry ?? Preview.Entry;
+        if (entry is null || entry.IsArchive)
         {
             return;
         }
 
-        var current = SelectedLine is null ? -1 : IndexOf(detail.Lines, SelectedLine);
-        var target = forward
-            ? _changeRows.FirstOrDefault(i => i > current, _changeRows[0])
-            : _changeRows.LastOrDefault(i => i < current, _changeRows[^1]);
-        SelectedLine = detail.Lines[target];
+        var document = OpenDocuments.FirstOrDefault(d => d.Entry?.Path == entry.Path);
+        if (document is null)
+        {
+            document = new DiffDocumentViewModel(LoadDiffAsync, _zoom);
+            OpenDocuments.Add(document);
+        }
+
+        if (document.Entry != entry)
+        {
+            // The preview usually has it already: reuse its diff instead of reading and decompiling again.
+            if (entry == Preview.Entry && !Preview.IsLoading && Preview.Detail is { } detail)
+            {
+                document.Show(entry, detail);
+            }
+            else
+            {
+                _ = document.LoadAsync(entry);
+            }
+        }
+
+        ActiveDocument = document;
+        _dialogs.ShowDiffWindow(this);
     }
 
-    private void ApplyRowFilter()
+    [RelayCommand]
+    private void CloseDocument(DiffDocumentViewModel? document)
+    {
+        document ??= ActiveDocument;
+        var index = document is null ? -1 : OpenDocuments.IndexOf(document);
+        if (index < 0)
+        {
+            return;
+        }
+
+        OpenDocuments.RemoveAt(index);
+        document!.Dispose();
+        if (ActiveDocument is null || ActiveDocument == document)
+        {
+            ActiveDocument = OpenDocuments.Count == 0 ? null : OpenDocuments[Math.Min(index, OpenDocuments.Count - 1)];
+        }
+    }
+
+    /// <summary>Closes every tab, e.g. when the diff window closes or a new comparison starts.</summary>
+    public void CloseAllDocuments()
+    {
+        foreach (var document in OpenDocuments)
+        {
+            document.Dispose();
+        }
+
+        OpenDocuments.Clear();
+        ActiveDocument = null;
+    }
+
+    private void ApplyRowFilter() => RebuildRows(Preview.Entry);
+
+    /// <summary>Fills the list from the filters and sort order, keeping <paramref name="keep"/> selected when it is still listed.</summary>
+    private void RebuildRows(EarDiffEntry? keep)
     {
         if (Comparison is null)
         {
@@ -520,70 +767,167 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         }
 
         var search = SearchText.Trim();
-        var rows = Comparison.Entries.Where(e =>
-            (ShowUnchanged || e.Status != DiffStatus.Unchanged)
-            && (ShowArchives || !e.IsArchive)
-            && (search.Length == 0 || e.Path.Contains(search, StringComparison.OrdinalIgnoreCase)));
-        Rows = new ObservableCollection<EarDiffEntry>(rows);
-    }
-
-    private async Task LoadDetailAsync(EarDiffEntry? entry)
-    {
-        if (_detailCts is not null)
+        var rows = new List<EarDiffRow>();
+        var sameTextCount = 0;
+        EarDiffRow? kept = null;
+        foreach (var e in Comparison.Entries)
         {
-            await _detailCts.CancelAsync();
-            _detailCts.Dispose();
+            var isSameText = IsSameText(e);
+            if (isSameText && !e.IsArchive)
+            {
+                sameTextCount++;
+            }
+
+            var isKept = keep is not null && e == keep;
+            if (!ShowsStatus(e.Status)
+                || (!ShowArchives && e.IsArchive)
+                || (search.Length > 0 && !e.Path.Contains(search, StringComparison.OrdinalIgnoreCase))
+                || (isSameText && !ShowSameText && !isKept)) // the open file stays listed, so it never vanishes from under the user
+            {
+                continue;
+            }
+
+            var row = new EarDiffRow(e, isSameText);
+            rows.Add(row);
+            if (isKept)
+            {
+                kept = row;
+            }
         }
 
-        Detail = null;
-        _changeRows = [];
-        if (entry is null || entry.IsArchive || Comparison is null)
-        {
-            return;
-        }
+        rows.Sort(CompareRows);
+        _rowsByPath = rows.ToDictionary(r => r.Path, StringComparer.Ordinal);
 
-        _detailCts = new CancellationTokenSource();
-        var ct = _detailCts.Token;
-        var comparison = Comparison;
-        IsLoadingDetail = true;
-        LoadingText = "Reading…";
+        var restoring = _restoringSelection;
+        _restoringSelection = true;
         try
         {
-            var leftTask = entry.Left is null ? Task.FromResult<byte[]?>(null) : ReadAsync(comparison.LeftRoot, entry.Path, ct);
-            var rightTask = entry.Right is null ? Task.FromResult<byte[]?>(null) : ReadAsync(comparison.RightRoot, entry.Path, ct);
-            var contents = await Task.WhenAll(leftTask, rightTask);
-
-            ContentDiffResult detail;
-            if (IsClassFile(entry.Path) && _decompilerSetup is { } setup)
-            {
-                LoadingText = "Decompiling…";
-                detail = await DecompileAndDiffAsync(setup, comparison, entry, contents[0], contents[1], ct);
-            }
-            else
-            {
-                detail = await Task.Run(() => ContentDiff.Build(entry.Path, contents[0], contents[1]), ct);
-            }
-
-            _changeRows = detail.Lines.Select((line, index) => (line, index)).Where(x => x.line.IsChange).Select(x => x.index).ToArray();
-            Detail = detail;
-            SelectedLine = _changeRows.Length > 0 ? detail.Lines[_changeRows[0]] : null;
-        }
-        catch (OperationCanceledException)
-        {
-            // Another row was selected.
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            Detail = new ContentDiffResult(false, [], $"Could not read entry: {ex.Message}");
+            Rows = new ObservableCollection<EarDiffRow>(rows);
+            SelectedRow = kept;
+            SameTextCount = sameTextCount;
         }
         finally
         {
-            if (!ct.IsCancellationRequested)
+            _restoringSelection = restoring;
+        }
+
+        ShowPreview(kept?.Entry);
+    }
+
+    private bool ShowsStatus(DiffStatus status) => status switch
+    {
+        DiffStatus.Modified => ShowModified,
+        DiffStatus.Added => ShowAdded,
+        DiffStatus.Removed => ShowRemoved,
+        _ => ShowUnchanged,
+    };
+
+    private int CompareRows(EarDiffRow a, EarDiffRow b)
+    {
+        var primary = SortKey switch
+        {
+            EarDiffSortKey.Status => StatusRank(a.Status).CompareTo(StatusRank(b.Status)),
+            EarDiffSortKey.Left => Nullable.Compare(a.Left?.Length, b.Left?.Length),
+            EarDiffSortKey.Right => Nullable.Compare(a.Right?.Length, b.Right?.Length),
+            _ => string.CompareOrdinal(a.Path, b.Path),
+        };
+        if (SortDescending)
+        {
+            primary = -primary;
+        }
+
+        return primary != 0 ? primary : string.CompareOrdinal(a.Path, b.Path);
+    }
+
+    // Changes first, in the order of the status chips.
+    private static int StatusRank(DiffStatus status) => status switch
+    {
+        DiffStatus.Modified => 0,
+        DiffStatus.Added => 1,
+        DiffStatus.Removed => 2,
+        _ => 3,
+    };
+
+    private bool IsSameText(EarDiffEntry entry) =>
+        entry.Status == DiffStatus.Modified && _sameText.Contains(SameTextKey(entry));
+
+    /// <summary>
+    /// Records files found to have identical text and tags their rows. Rows are not removed here, so the list never
+    /// rearranges itself while being read; the next filter, sort or refresh hides them.
+    /// </summary>
+    private void MarkSameText(EarComparison comparison, IEnumerable<EarDiffEntry> entries)
+    {
+        if (!ReferenceEquals(comparison, Comparison))
+        {
+            return; // a stale result from before a new comparison or refresh
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.Status != DiffStatus.Modified || !_sameText.Add(SameTextKey(entry)))
             {
-                IsLoadingDetail = false;
-                LoadingText = string.Empty;
+                continue;
+            }
+
+            if (!entry.IsArchive)
+            {
+                SameTextCount++;
+            }
+
+            if (_rowsByPath.TryGetValue(entry.Path, out var row) && row.Entry == entry)
+            {
+                row.IsSameText = true;
             }
         }
+    }
+
+    private static string SameTextKey(EarDiffEntry entry) => string.Create(
+        CultureInfo.InvariantCulture, $"{entry.Path}|{entry.Left?.Length}:{entry.Left?.Crc32}|{entry.Right?.Length}:{entry.Right?.Crc32}");
+
+    private bool HasSameSource(ClassPair pair) =>
+        _decompiled.TryGetValue(pair.LeftKey, out var left) && left.IsCompletedSuccessfully
+        && _decompiled.TryGetValue(pair.RightKey, out var right) && right.IsCompletedSuccessfully
+        && string.Equals(left.Result, right.Result, StringComparison.Ordinal);
+
+    /// <summary>com/acme/Foo$Bar$1.class → com/acme/Foo.class.</summary>
+    private static string OuterClassPath(string path)
+    {
+        var folder = FolderOf(path);
+        var name = path[folder.Length..];
+        var dollar = name.IndexOf('$', StringComparison.Ordinal);
+        return dollar <= 0 ? path : string.Concat(folder, name.AsSpan(0, dollar), ".class");
+    }
+
+    /// <summary>Builds the diff of one entry of the current comparison, for the preview and the diff window's tabs.</summary>
+    private async Task<ContentDiffResult> LoadDiffAsync(EarDiffEntry entry, Action<string> reportStatus, CancellationToken ct)
+    {
+        if (Comparison is not { } comparison)
+        {
+            return new ContentDiffResult(false, [], "Run a comparison first.");
+        }
+
+        var leftTask = entry.Left is null ? Task.FromResult<byte[]?>(null) : ReadAsync(comparison.LeftRoot, entry.Path, ct);
+        var rightTask = entry.Right is null ? Task.FromResult<byte[]?>(null) : ReadAsync(comparison.RightRoot, entry.Path, ct);
+        var contents = await Task.WhenAll(leftTask, rightTask);
+
+        ContentDiffResult detail;
+        if (IsClassFile(entry.Path) && _decompilerSetup is { } setup)
+        {
+            reportStatus("Decompiling…");
+            detail = await DecompileAndDiffAsync(setup, comparison, entry, contents[0], contents[1], ct);
+        }
+        else
+        {
+            detail = await Task.Run(() => ContentDiff.Build(entry.Path, contents[0], contents[1]), ct);
+        }
+
+        // Covers what the background passes skip, e.g. classes when background decompiling is off.
+        if (entry.Status == DiffStatus.Modified && detail.IsText && !detail.Stats.HasChanges)
+        {
+            MarkSameText(comparison, [entry]);
+        }
+
+        return detail;
     }
 
     private async Task<byte[]?> ReadAsync(string root, string path, CancellationToken ct) =>
@@ -601,7 +945,13 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
             var sources = await Task.WhenAll(leftSource, rightSource);
 
             var prefix = string.Join(" · ", new[] { "Decompiled with Vineflower", ContentDiff.DescribeClassVersionChange(left, right) }.OfType<string>());
-            return await Task.Run(() => ContentDiff.BuildText(sources[0], sources[1], prefix), ct);
+            var result = await Task.Run(() => ContentDiff.BuildText(sources[0], sources[1], prefix), ct);
+
+            // A class recompiled from equivalent source (only comments moved, another compiler build) differs in
+            // bytes the decompiler does not show, such as line numbers; the row says Modified, so say why.
+            return !result.Stats.HasChanges && left is not null && right is not null && !left.AsSpan().SequenceEqual(right)
+                ? result with { Summary = $"{result.Summary} · the class files differ only in compiler output the decompiled source does not show (e.g. line numbers or debug info)" }
+                : result;
         }
         catch (Exception ex) when (ex is InvalidOperationException or TimeoutException or IOException or UnauthorizedAccessException)
         {
@@ -689,21 +1039,8 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         StopBackgroundWork();
         _prefetchCts?.Dispose();
         _refreshCts?.Dispose();
-        _detailCts?.Cancel();
-        _detailCts?.Dispose();
-    }
-
-    private static int IndexOf(IReadOnlyList<SideBySideLine> lines, SideBySideLine line)
-    {
-        for (var i = 0; i < lines.Count; i++)
-        {
-            if (ReferenceEquals(lines[i], line))
-            {
-                return i;
-            }
-        }
-
-        return -1;
+        Preview.Dispose();
+        CloseAllDocuments();
     }
 
     /// <summary>Class files by folder for one comparison, to find inner classes without scanning every entry.</summary>
@@ -714,4 +1051,9 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     /// <param name="RelatedPaths">Virtual paths of the class and its inner classes on that side.</param>
     /// <param name="Key">Identifies the content, for <see cref="_decompiled"/>.</param>
     private sealed record ClassGroupWork(string Root, EarDiffEntry Entry, IReadOnlyList<string> RelatedPaths, string Key);
+
+    /// <param name="LeftKey">The left class group, for <see cref="_decompiled"/>.</param>
+    /// <param name="RightKey">The right class group.</param>
+    /// <param name="Modified">Modified rows of the outer class and its inner classes, tagged together when both sides decompile the same.</param>
+    private sealed record ClassPair(string LeftKey, string RightKey, IReadOnlyList<EarDiffEntry> Modified);
 }

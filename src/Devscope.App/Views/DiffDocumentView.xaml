@@ -1,0 +1,143 @@
+<UserControl x:Class="Devscope.App.Views.DiffDocumentView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+             xmlns:ctl="clr-namespace:Devscope.App.Controls"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:DiffDocumentViewModel}"
+             d:DesignWidth="700" d:DesignHeight="600"
+             PreviewMouseWheel="OnPreviewMouseWheel">
+  <!-- The diff of one file: the EAR diff page's preview pane and each tab of the diff window. -->
+  <Grid>
+    <TextBlock Text="Select a file to see what changed." Style="{StaticResource Muted}"
+               HorizontalAlignment="Center" VerticalAlignment="Center"
+               Visibility="{Binding HasEntry, Converter={StaticResource CollapsedWhen}}" />
+
+    <DockPanel Visibility="{Binding HasEntry, Converter={StaticResource VisibleWhen}}">
+      <DockPanel DockPanel.Dock="Top" Margin="12,10">
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top"
+                    Visibility="{Binding Detail.IsText, Converter={StaticResource VisibleWhen}}">
+          <Button Style="{StaticResource IconButton}" Content="&#xE70E;" ToolTip="Previous change (Shift+F8)" Command="{Binding PreviousChangeCommand}" />
+          <Button Style="{StaticResource IconButton}" Content="&#xE70D;" ToolTip="Next change (F8)" Command="{Binding NextChangeCommand}" />
+        </StackPanel>
+        <StackPanel>
+          <!--
+            The open file, in large type: always clear which file this is. Not zoomed with the diff text, and wraps
+            the change counter onto a second line rather than cutting it off when the pane is narrow.
+          -->
+          <WrapPanel>
+            <Border Style="{StaticResource Badge}" Background="{Binding Entry.Status, Converter={StaticResource BadgeBrush}}" Margin="0,0,8,0">
+              <TextBlock Style="{StaticResource BadgeText}" Text="{Binding Entry.Status}" />
+            </Border>
+            <TextBlock Text="{Binding Entry.Name}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+            <!-- Git-style change counter: +12 -5 and a proportional five-square bar. -->
+            <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="{Binding Detail.Summary}"
+                        Visibility="{Binding Detail.Stats.HasChanges, Converter={StaticResource VisibleWhen}}"
+                        AutomationProperties.Name="{Binding Detail.Summary}">
+              <TextBlock Text="{Binding Detail.Stats.Additions, StringFormat='+{0:N0}'}" Foreground="{StaticResource AddedBrush}"
+                         FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" />
+              <TextBlock Text="{Binding Detail.Stats.Deletions, StringFormat='-{0:N0}'}" Foreground="{StaticResource RemovedBrush}"
+                         FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" Margin="8,0,0,0" />
+              <ItemsControl ItemsSource="{Binding Detail.Stats.Blocks}" Margin="8,0,0,0" VerticalAlignment="Center" Focusable="False">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Width="8" Height="8" Margin="1,0" CornerRadius="1.5" Background="{Binding Converter={StaticResource BadgeBrush}}" />
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </WrapPanel>
+          <TextBlock Text="{Binding Entry.Path}" Style="{StaticResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis"
+                     ToolTip="{Binding Entry.Path}" Margin="0,2,0,0" />
+          <DockPanel Margin="0,4,0,0">
+            <!-- Zoom level of the diff lines, on its own row so zooming never moves the header. -->
+            <Button DockPanel.Dock="Right" Content="{Binding Zoom.Percent}" Command="{Binding Zoom.ResetZoomCommand}"
+                    Padding="8,2" Margin="8,0,0,0" FontSize="12" VerticalAlignment="Top"
+                    Visibility="{Binding Zoom.IsZoomed, Converter={StaticResource VisibleWhen}}"
+                    ToolTip="Text zoom (Ctrl+mouse wheel, Ctrl+plus, Ctrl+minus). Click or press Ctrl+0 to reset."
+                    AutomationProperties.Name="{Binding Zoom.Percent, StringFormat='Zoom {0}, reset'}" />
+            <TextBlock Text="{Binding Detail.Summary}" Style="{StaticResource Muted}" TextWrapping="Wrap" />
+          </DockPanel>
+        </StackPanel>
+      </DockPanel>
+
+      <!--
+        Side-by-side text diff; wrapped lines keep both halves aligned. Like git: old side red with "-",
+        new side green with "+", the changed words inside a modified line highlighted more strongly.
+      -->
+      <ListBox ItemsSource="{Binding Detail.Lines}" SelectedItem="{Binding SelectedLine}"
+               Visibility="{Binding Detail.IsText, Converter={StaticResource VisibleWhen}}"
+               ItemContainerStyle="{StaticResource DiffLineItem}"
+               ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+               VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+               VirtualizingPanel.ScrollUnit="Pixel"
+               ctl:Behaviors.ScrollSelectionIntoView="True"
+               BorderThickness="0" Background="Transparent"
+               AutomationProperties.Name="Text differences">
+        <ListBox.ItemTemplate>
+          <DataTemplate>
+            <Grid>
+              <!-- Zoom scales text, line numbers and gutters together; a layout transform also re-wraps long lines. -->
+              <Grid.LayoutTransform>
+                <ScaleTransform ScaleX="{Binding DataContext.Zoom.Scale, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                ScaleY="{Binding DataContext.Zoom.Scale, RelativeSource={RelativeSource AncestorType=ListBox}}" />
+              </Grid.LayoutTransform>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="44" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="44" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+              </Grid.ColumnDefinitions>
+              <Border Grid.Column="0" Grid.ColumnSpan="3" Background="{Binding LeftKind, Converter={StaticResource LeftLineBrush}}" />
+              <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{Binding LeftKind, Converter={StaticResource LeftGutterBrush}}" />
+              <Border Grid.Column="3" Grid.ColumnSpan="3" Background="{Binding RightKind, Converter={StaticResource RightLineBrush}}" />
+              <Border Grid.Column="3" Grid.ColumnSpan="2" Background="{Binding RightKind, Converter={StaticResource RightGutterBrush}}" />
+
+              <TextBlock Grid.Column="0" Text="{Binding LeftNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                         TextAlignment="Right" Margin="0,0,6,0" />
+              <TextBlock Grid.Column="1" Text="{Binding LeftKind, Converter={StaticResource LeftMarker}}" Style="{StaticResource MonoText}"
+                         Foreground="{StaticResource DeletedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
+              <TextBlock Grid.Column="2" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,8,0"
+                         ctl:DiffText.Text="{Binding LeftText}" ctl:DiffText.Spans="{Binding LeftSpans}"
+                         ctl:DiffText.ChangedBrush="{StaticResource DeletedWordBrush}" />
+
+              <TextBlock Grid.Column="3" Text="{Binding RightNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                         TextAlignment="Right" Margin="0,0,6,0" />
+              <TextBlock Grid.Column="4" Text="{Binding RightKind, Converter={StaticResource RightMarker}}" Style="{StaticResource MonoText}"
+                         Foreground="{StaticResource InsertedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
+              <TextBlock Grid.Column="5" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,0,0"
+                         ctl:DiffText.Text="{Binding RightText}" ctl:DiffText.Spans="{Binding RightSpans}"
+                         ctl:DiffText.ChangedBrush="{StaticResource InsertedWordBrush}" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+      </ListBox>
+    </DockPanel>
+
+    <StackPanel VerticalAlignment="Top" Visibility="{Binding IsLoading, Converter={StaticResource VisibleWhen}}">
+      <ProgressBar IsIndeterminate="True" Height="4" />
+      <TextBlock Text="{Binding LoadingText}" Style="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,40,0,0" />
+    </StackPanel>
+  </Grid>
+
+  <UserControl.InputBindings>
+    <KeyBinding Key="F8" Command="{Binding NextChangeCommand}" />
+    <KeyBinding Key="F8" Modifiers="Shift" Command="{Binding PreviousChangeCommand}" />
+    <KeyBinding Key="OemPlus" Modifiers="Control" Command="{Binding Zoom.ZoomInCommand}" />
+    <KeyBinding Key="Add" Modifiers="Control" Command="{Binding Zoom.ZoomInCommand}" />
+    <KeyBinding Key="OemMinus" Modifiers="Control" Command="{Binding Zoom.ZoomOutCommand}" />
+    <KeyBinding Key="Subtract" Modifiers="Control" Command="{Binding Zoom.ZoomOutCommand}" />
+    <KeyBinding Key="D0" Modifiers="Control" Command="{Binding Zoom.ResetZoomCommand}" />
+    <KeyBinding Key="NumPad0" Modifiers="Control" Command="{Binding Zoom.ResetZoomCommand}" />
+  </UserControl.InputBindings>
+</UserControl>

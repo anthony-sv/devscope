@@ -25,6 +25,9 @@ public interface IDialogService
 
     /// <summary>Opens the Settings window; saved changes are applied through <see cref="IUserSettingsStore.Changed"/>.</summary>
     void ShowSettings();
+
+    /// <summary>Shows the diff window with the EAR diff's open tabs, or brings it to the front when already open.</summary>
+    void ShowDiffWindow(EarDiffViewModel viewModel);
 }
 
 public sealed class DialogService(IServiceProvider services) : IDialogService
@@ -64,6 +67,21 @@ public sealed class DialogService(IServiceProvider services) : IDialogService
     {
         var window = new SettingsWindow { DataContext = services.GetRequiredService<SettingsViewModel>(), Owner = Owner };
         window.ShowDialog();
+    }
+
+    public void ShowDiffWindow(EarDiffViewModel viewModel)
+    {
+        // One window for all tabs. Not owned by the main window, so it can sit behind it or on another monitor;
+        // the app still shuts down with the main window (ShutdownMode="OnMainWindowClose").
+        var window = Application.Current.Windows.OfType<DiffWindow>().FirstOrDefault()
+            ?? new DiffWindow { DataContext = viewModel };
+        window.Show();
+        if (window.WindowState == WindowState.Minimized)
+        {
+            window.WindowState = WindowState.Maximized;
+        }
+
+        window.Activate();
     }
 
     private static Window Owner => Application.Current.MainWindow;

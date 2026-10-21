@@ -4,12 +4,54 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+             xmlns:views="clr-namespace:Devscope.App.Views"
              xmlns:ctl="clr-namespace:Devscope.App.Controls"
              mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:EarDiffViewModel}"
              d:DesignWidth="1200" d:DesignHeight="800">
+  <UserControl.Resources>
+    <!--
+      File rows. The selected row (the one shown in the preview) keeps a filled background, a thick accent bar, an
+      outline and an eye icon even when the focus moves to the diff: WPF's default paints an unfocused selection
+      faint grey, which is easy to lose.
+    -->
+    <Style x:Key="DiffRowItem" TargetType="ListViewItem">
+      <Setter Property="AutomationProperties.Name" Value="{Binding Path}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <EventSetter Event="MouseDoubleClick" Handler="OnRowDoubleClick" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListViewItem">
+            <Grid Background="Transparent">
+              <Border x:Name="Fill" Background="{DynamicResource AccentFillColorDefaultBrush}" Opacity="0.22" Visibility="Collapsed" />
+              <Border x:Name="Hover" Background="#808080" Opacity="0.10" Visibility="Collapsed" />
+              <GridViewRowPresenter Margin="0,4" Columns="{TemplateBinding GridView.ColumnCollection}" Content="{TemplateBinding Content}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+              <Border x:Name="Outline" BorderThickness="1.5" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+              <Border x:Name="Bar" Width="5" HorizontalAlignment="Left" Background="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Hover" Property="Visibility" Value="Visible" />
+              </Trigger>
+              <!-- Same look whether or not the list has the focus (Selector.IsSelectionActive is ignored on purpose). -->
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Fill" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Outline" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Bar" Property="Visibility" Value="Visible" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+  </UserControl.Resources>
+
   <Grid Margin="16">
     <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="Auto" />
       <RowDefinition Height="*" />
@@ -80,51 +122,103 @@
       </Grid>
     </Border>
 
-    <!-- Result filters -->
-    <DockPanel Grid.Row="1" Margin="0,12,0,8" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
-      <Button DockPanel.Dock="Right" Content="Export CSV…" Command="{Binding ExportCommand}" />
-      <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" Margin="0,0,12,0">
-        <Border Style="{StaticResource Badge}" Background="{StaticResource ModifiedBrush}" Margin="0,0,6,0">
-          <TextBlock Style="{StaticResource BadgeText}" Text="{Binding Comparison.Modified, StringFormat='{}{0:N0} modified'}" />
-        </Border>
-        <Border Style="{StaticResource Badge}" Background="{StaticResource AddedBrush}" Margin="0,0,6,0">
-          <TextBlock Style="{StaticResource BadgeText}" Text="{Binding Comparison.Added, StringFormat='{}{0:N0} added'}" />
-        </Border>
-        <Border Style="{StaticResource Badge}" Background="{StaticResource RemovedBrush}" Margin="0,0,6,0">
-          <TextBlock Style="{StaticResource BadgeText}" Text="{Binding Comparison.Removed, StringFormat='{}{0:N0} removed'}" />
-        </Border>
-      </StackPanel>
-      <CheckBox Content="Unchanged" IsChecked="{Binding ShowUnchanged}" Margin="0,0,12,0" VerticalAlignment="Center" />
-      <CheckBox Content="Archive rows" IsChecked="{Binding ShowArchives}" Margin="0,0,12,0" VerticalAlignment="Center"
-                ToolTip="Show the nested WAR/JAR rows themselves (their status is derived from their content)" />
-      <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=150}" Width="320" HorizontalAlignment="Left"
+    <!-- Result filters: status chips, path search and more options. -->
+    <DockPanel Grid.Row="1" Margin="0,12,0,0" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
+      <Button x:Name="MoreButton" DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="&#xE712;"
+              ToolTip="More options" Click="OnMoreClick">
+        <Button.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Show files with identical text" IsCheckable="True" IsChecked="{Binding ShowSameText}"
+                      ToolTip="Modified files whose lines all read the same: only line endings, a byte order mark or compiler output differ" />
+            <MenuItem Header="Show archive rows" IsCheckable="True" IsChecked="{Binding ShowArchives}"
+                      ToolTip="The nested WAR/JAR rows themselves (their status is derived from their content)" />
+            <Separator />
+            <MenuItem Header="Export CSV…" Command="{Binding ExportCommand}" />
+          </ContextMenu>
+        </Button.ContextMenu>
+      </Button>
+      <TextBox DockPanel.Dock="Right" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=150}" Width="300"
                AutomationProperties.Name="Filter paths" ToolTip="Filter by path" />
+      <WrapPanel VerticalAlignment="Center">
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowModified}" AutomationProperties.Name="Modified"
+                      ToolTip="Files whose content changed">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource ModifiedBrush}" />
+            <TextBlock Text="Modified" />
+            <TextBlock Text="{Binding ChangedCount, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowAdded}" AutomationProperties.Name="Added">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource AddedBrush}" />
+            <TextBlock Text="Added" />
+            <TextBlock Text="{Binding Comparison.Added, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowRemoved}" AutomationProperties.Name="Removed">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource RemovedBrush}" />
+            <TextBlock Text="Removed" />
+            <TextBlock Text="{Binding Comparison.Removed, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowUnchanged}" AutomationProperties.Name="Unchanged">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource UnchangedBrush}" />
+            <TextBlock Text="Unchanged" />
+            <TextBlock Text="{Binding Comparison.Unchanged, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+      </WrapPanel>
     </DockPanel>
 
-    <!-- Results and detail -->
-    <Grid Grid.Row="2" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
+    <!-- How many identical-text files there are, and a way to list them. -->
+    <TextBlock Grid.Row="2" Margin="2,8,0,0" TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}"
+               AutomationProperties.Name="Identical text hint"
+               Visibility="{Binding SameTextCount, Converter={StaticResource VisibleWhen}}">
+      <Run Text="&#xE946;" FontFamily="{StaticResource IconFont}" BaselineAlignment="Center" />
+      <Run Text="{Binding SameTextHint, Mode=OneWay}" />
+      <Hyperlink Command="{Binding ToggleSameTextCommand}"><Run Text="{Binding SameTextAction, Mode=OneWay}" /></Hyperlink>
+    </TextBlock>
+
+    <!-- Results and preview -->
+    <Grid Grid.Row="3" Margin="0,8,0,0" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="5*" MinWidth="280" />
+        <ColumnDefinition Width="5*" MinWidth="480" />
         <ColumnDefinition Width="Auto" />
         <ColumnDefinition Width="6*" MinWidth="320" />
       </Grid.ColumnDefinitions>
 
       <ListView Grid.Column="0" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
+                ItemContainerStyle="{StaticResource DiffRowItem}" ctl:Behaviors.FillColumn="2"
                 VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                AutomationProperties.Name="Differences">
-        <ListView.ItemContainerStyle>
-          <Style TargetType="ListViewItem" BasedOn="{StaticResource {x:Static GridView.GridViewItemContainerStyleKey}}">
-            <Setter Property="AutomationProperties.Name" Value="{Binding Path}" />
-          </Style>
-        </ListView.ItemContainerStyle>
+                AutomationProperties.Name="Differences"
+                ToolTip="Click a file to preview its diff; double-click (or press Enter) to open it in the diff window">
+        <ListView.InputBindings>
+          <KeyBinding Key="Enter" Command="{Binding OpenInWindowCommand}" CommandParameter="{Binding SelectedRow}" />
+        </ListView.InputBindings>
         <ListView.ContextMenu>
           <ContextMenu>
+            <MenuItem Header="Open in diff window" Command="{Binding OpenInWindowCommand}" CommandParameter="{Binding SelectedRow}" InputGestureText="Enter" />
             <MenuItem Header="Copy path" Command="{Binding CopyPathCommand}" CommandParameter="{Binding SelectedRow}" />
           </ContextMenu>
         </ListView.ContextMenu>
         <ListView.View>
           <GridView>
-            <GridViewColumn Header="Status" Width="96">
+            <!-- Eye on the previewed row: a marker that does not depend on colour. -->
+            <GridViewColumn Width="30">
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Style="{StaticResource Icon}" Text="&#xE7B3;" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                             AutomationProperties.Name="Shown in preview"
+                             Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}, Converter={StaticResource VisibleWhen}}" />
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="96">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding StatusHeader}" CommandParameter="{x:Static vm:EarDiffSortKey.Status}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
               <GridViewColumn.CellTemplate>
                 <DataTemplate>
                   <Border Style="{StaticResource Badge}" Background="{Binding Status, Converter={StaticResource BadgeBrush}}">
@@ -133,18 +227,37 @@
                 </DataTemplate>
               </GridViewColumn.CellTemplate>
             </GridViewColumn>
-            <GridViewColumn Header="Path" Width="360">
+            <GridViewColumn Width="360">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding PathHeader}" CommandParameter="{x:Static vm:EarDiffSortKey.Path}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
               <GridViewColumn.CellTemplate>
                 <DataTemplate>
                   <StackPanel ToolTip="{Binding Path}">
-                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                    <StackPanel Orientation="Horizontal">
+                      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                      <Border Style="{StaticResource Badge}" Margin="8,0,0,0" BorderThickness="1" Background="Transparent"
+                              BorderBrush="{StaticResource UnchangedBrush}"
+                              Visibility="{Binding IsSameText, Converter={StaticResource VisibleWhen}}"
+                              ToolTip="Modified, but every line reads the same: only line endings, a byte order mark or compiler output differ">
+                        <TextBlock Text="same text" FontSize="11" Style="{StaticResource Muted}" />
+                      </Border>
+                    </StackPanel>
                     <TextBlock Text="{Binding Path}" FontSize="11" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" />
                   </StackPanel>
                 </DataTemplate>
               </GridViewColumn.CellTemplate>
             </GridViewColumn>
-            <GridViewColumn Header="Left" Width="72" DisplayMemberBinding="{Binding Left.Length, Converter={StaticResource Bytes}, FallbackValue='—'}" />
-            <GridViewColumn Header="Right" Width="72" DisplayMemberBinding="{Binding Right.Length, Converter={StaticResource Bytes}, FallbackValue='—'}" />
+            <GridViewColumn Width="80" DisplayMemberBinding="{Binding Left.Length, Converter={StaticResource Bytes}, FallbackValue='—'}">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding LeftHeader}" CommandParameter="{x:Static vm:EarDiffSortKey.Left}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
+            </GridViewColumn>
+            <GridViewColumn Width="80" DisplayMemberBinding="{Binding Right.Length, Converter={StaticResource Bytes}, FallbackValue='—'}">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding RightHeader}" CommandParameter="{x:Static vm:EarDiffSortKey.Right}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
+            </GridViewColumn>
           </GridView>
         </ListView.View>
       </ListView>
@@ -152,103 +265,17 @@
       <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" />
 
       <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
-        <Grid>
-          <TextBlock Text="Select a file to see what changed." Style="{StaticResource Muted}"
-                     HorizontalAlignment="Center" VerticalAlignment="Center"
-                     Visibility="{Binding SelectedRow, Converter={StaticResource CollapsedWhen}}" />
-
-          <DockPanel Visibility="{Binding Detail, Converter={StaticResource VisibleWhen}}">
-            <DockPanel DockPanel.Dock="Top" Margin="12,10">
-              <StackPanel DockPanel.Dock="Right" Orientation="Horizontal"
-                          Visibility="{Binding Detail.IsText, Converter={StaticResource VisibleWhen}}">
-                <Button Style="{StaticResource IconButton}" Content="&#xE70E;" ToolTip="Previous change" Command="{Binding PreviousChangeCommand}" />
-                <Button Style="{StaticResource IconButton}" Content="&#xE70D;" ToolTip="Next change" Command="{Binding NextChangeCommand}" />
-              </StackPanel>
-              <StackPanel>
-                <StackPanel Orientation="Horizontal">
-                  <TextBlock Text="{Binding SelectedRow.Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
-
-                  <!-- Git-style change counter: +12 -5 and a proportional five-square bar. -->
-                  <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="{Binding Detail.Summary}"
-                              Visibility="{Binding Detail.Stats.HasChanges, Converter={StaticResource VisibleWhen}}"
-                              AutomationProperties.Name="{Binding Detail.Summary}">
-                    <TextBlock Text="{Binding Detail.Stats.Additions, StringFormat='+{0:N0}'}" Foreground="{StaticResource AddedBrush}"
-                               FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding Detail.Stats.Deletions, StringFormat='-{0:N0}'}" Foreground="{StaticResource RemovedBrush}"
-                               FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" Margin="8,0,0,0" />
-                    <ItemsControl ItemsSource="{Binding Detail.Stats.Blocks}" Margin="8,0,0,0" VerticalAlignment="Center" Focusable="False">
-                      <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                          <StackPanel Orientation="Horizontal" />
-                        </ItemsPanelTemplate>
-                      </ItemsControl.ItemsPanel>
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                          <Border Width="8" Height="8" Margin="1,0" CornerRadius="1.5" Background="{Binding Converter={StaticResource BadgeBrush}}" />
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </StackPanel>
-                </StackPanel>
-                <TextBlock Text="{Binding Detail.Summary}" Style="{StaticResource Muted}" TextWrapping="Wrap" />
-              </StackPanel>
-            </DockPanel>
-
-            <!--
-              Side-by-side text diff; wrapped lines keep both halves aligned. Like git: old side red with "-",
-              new side green with "+", the changed words inside a modified line highlighted more strongly.
-            -->
-            <ListBox ItemsSource="{Binding Detail.Lines}" SelectedItem="{Binding SelectedLine}"
-                     Visibility="{Binding Detail.IsText, Converter={StaticResource VisibleWhen}}"
-                     ItemContainerStyle="{StaticResource DiffLineItem}"
-                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
-                     VirtualizingPanel.ScrollUnit="Pixel"
-                     ctl:Behaviors.ScrollSelectionIntoView="True"
-                     BorderThickness="0" Background="Transparent"
-                     AutomationProperties.Name="Text differences">
-              <ListBox.ItemTemplate>
-                <DataTemplate>
-                  <Grid>
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="44" />
-                      <ColumnDefinition Width="16" />
-                      <ColumnDefinition Width="*" />
-                      <ColumnDefinition Width="44" />
-                      <ColumnDefinition Width="16" />
-                      <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Grid.ColumnSpan="3" Background="{Binding LeftKind, Converter={StaticResource LeftLineBrush}}" />
-                    <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{Binding LeftKind, Converter={StaticResource LeftGutterBrush}}" />
-                    <Border Grid.Column="3" Grid.ColumnSpan="3" Background="{Binding RightKind, Converter={StaticResource RightLineBrush}}" />
-                    <Border Grid.Column="3" Grid.ColumnSpan="2" Background="{Binding RightKind, Converter={StaticResource RightGutterBrush}}" />
-
-                    <TextBlock Grid.Column="0" Text="{Binding LeftNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                               TextAlignment="Right" Margin="0,0,6,0" />
-                    <TextBlock Grid.Column="1" Text="{Binding LeftKind, Converter={StaticResource LeftMarker}}" Style="{StaticResource MonoText}"
-                               Foreground="{StaticResource DeletedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
-                    <TextBlock Grid.Column="2" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,8,0"
-                               ctl:DiffText.Text="{Binding LeftText}" ctl:DiffText.Spans="{Binding LeftSpans}"
-                               ctl:DiffText.ChangedBrush="{StaticResource DeletedWordBrush}" />
-
-                    <TextBlock Grid.Column="3" Text="{Binding RightNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                               TextAlignment="Right" Margin="0,0,6,0" />
-                    <TextBlock Grid.Column="4" Text="{Binding RightKind, Converter={StaticResource RightMarker}}" Style="{StaticResource MonoText}"
-                               Foreground="{StaticResource InsertedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
-                    <TextBlock Grid.Column="5" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,0,0"
-                               ctl:DiffText.Text="{Binding RightText}" ctl:DiffText.Spans="{Binding RightSpans}"
-                               ctl:DiffText.ChangedBrush="{StaticResource InsertedWordBrush}" />
-                  </Grid>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-          </DockPanel>
-
-          <StackPanel VerticalAlignment="Top" Visibility="{Binding IsLoadingDetail, Converter={StaticResource VisibleWhen}}">
-            <ProgressBar IsIndeterminate="True" Height="4" />
-            <TextBlock Text="{Binding LoadingText}" Style="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,40,0,0" />
-          </StackPanel>
-        </Grid>
+        <DockPanel>
+          <Button DockPanel.Dock="Top" HorizontalAlignment="Right" Margin="0,8,8,-4" Command="{Binding OpenInWindowCommand}"
+                  Visibility="{Binding Preview.HasEntry, Converter={StaticResource VisibleWhen}}"
+                  ToolTip="Open this file in a tab of the diff window (or double-click it in the list)">
+            <StackPanel Orientation="Horizontal">
+              <TextBlock Style="{StaticResource Icon}" Text="&#xE8A7;" Margin="0,0,6,0" />
+              <TextBlock Text="Open in window" />
+            </StackPanel>
+          </Button>
+          <views:DiffDocumentView DataContext="{Binding Preview}" />
+        </DockPanel>
       </Border>
     </Grid>
   </Grid>

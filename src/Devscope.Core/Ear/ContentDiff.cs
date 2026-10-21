@@ -116,7 +116,53 @@ public static class ContentDiff
             return new ContentDiffResult(false, [], BinarySummary(path, left, right));
         }
 
-        return BuildText(Decode(left), Decode(right), summaryPrefix: null);
+        var result = BuildText(Decode(left), Decode(right), summaryPrefix: null);
+        return !result.Stats.HasChanges && DescribeInvisibleDifference(left, right) is { } reason
+            ? result with { Summary = $"{result.Summary} · {reason}" }
+            : result;
+    }
+
+    /// <summary>
+    /// Whether two existing versions of a text file read the same line by line, as <see cref="Build"/> shows them:
+    /// a byte order mark and the line ending style are ignored. Cheaper than a diff, for sorting many rows.
+    /// </summary>
+    public static bool HasSameText(string path, byte[]? left, byte[]? right)
+    {
+        if (left is null || right is null || Math.Max(left.Length, right.Length) > MaxTextBytes || !IsText(path, left) || !IsText(path, right))
+        {
+            return false;
+        }
+
+        return string.Equals(NormalizeLineEndings(Decode(left)), NormalizeLineEndings(Decode(right)), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// For two files whose bytes differ although their line diff is empty, says what the bytes differ in: a UTF-8
+    /// byte order mark and line endings are both invisible in the line diff. Null when the bytes are equal.
+    /// </summary>
+    public static string? DescribeInvisibleDifference(byte[]? left, byte[]? right)
+    {
+        if (left is null || right is null || left.AsSpan().SequenceEqual(right))
+        {
+            return null;
+        }
+
+        var reasons = new List<string>();
+        var (leftBom, rightBom) = (HasUtf8Bom(left), HasUtf8Bom(right));
+        if (leftBom != rightBom)
+        {
+            reasons.Add($"the UTF-8 byte order mark ({(rightBom ? "added" : "removed")})");
+        }
+
+        var (leftEndings, rightEndings) = (DescribeLineEndings(left), DescribeLineEndings(right));
+        if (leftEndings != rightEndings)
+        {
+            reasons.Add($"line endings ({leftEndings} → {rightEndings})");
+        }
+
+        return reasons.Count > 0
+            ? $"the bytes differ only in {string.Join(" and ", reasons)}"
+            : "the bytes differ but decode to the same text (e.g. a different encoding)";
     }
 
     /// <summary>Line diff of two texts (e.g. decompiled sources). Null means the side does not exist.</summary>
@@ -235,6 +281,46 @@ public static class ContentDiff
 
         using var reader = new StreamReader(new MemoryStream(bytes), Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
         return reader.ReadToEnd();
+    }
+
+    // The line diff splits on CRLF, LF and CR alike.
+    private static string NormalizeLineEndings(string text) =>
+        text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+
+    private static bool HasUtf8Bom(byte[] bytes) => bytes.AsSpan().StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]);
+
+    /// <summary>CRLF, LF or CR when the file uses one style throughout, "mixed" otherwise, "none" without line breaks.</summary>
+    private static string DescribeLineEndings(byte[] bytes)
+    {
+        int crlf = 0, lf = 0, cr = 0;
+        for (var i = 0; i < bytes.Length; i++)
+        {
+            if (bytes[i] == '\r')
+            {
+                if (i + 1 < bytes.Length && bytes[i + 1] == '\n')
+                {
+                    crlf++;
+                    i++;
+                }
+                else
+                {
+                    cr++;
+                }
+            }
+            else if (bytes[i] == '\n')
+            {
+                lf++;
+            }
+        }
+
+        return (crlf, lf, cr) switch
+        {
+            (0, 0, 0) => "none",
+            (_, 0, 0) => "CRLF",
+            (0, _, 0) => "LF",
+            (0, 0, _) => "CR",
+            _ => "mixed",
+        };
     }
 
     private static string BinarySummary(string path, byte[]? left, byte[]? right)

@@ -406,14 +406,18 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
         // and every exception is handled below.
         try
         {
-            if (_filterCts is not null)
+            // Swap before awaiting, so overlapping calls each cancel only their predecessor and the field never
+            // points at a disposed source.
+            var previous = _filterCts;
+            var cts = new CancellationTokenSource();
+            _filterCts = cts;
+            var ct = cts.Token;
+            if (previous is not null)
             {
-                await _filterCts.CancelAsync();
-                _filterCts.Dispose();
+                await previous.CancelAsync();
+                previous.Dispose();
             }
 
-            _filterCts = new CancellationTokenSource();
-            var ct = _filterCts.Token;
             if (!immediate)
             {
                 await Task.Delay(FilterDebounce, ct);
