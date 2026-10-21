@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Devscope.App.Services;
 
-/// <summary>Small per-user UI preferences (last paths, last workspace, read limits).</summary>
+/// <summary>Per-user preferences: last paths and workspace, plus everything edited in the Settings window.</summary>
 public sealed class UserSettings
 {
     public string LeftEarPath { get; set; } = string.Empty;
@@ -22,13 +22,40 @@ public sealed class UserSettings
 
     /// <summary>Vineflower jar; empty means next to Devscope.exe or in its tools folder.</summary>
     public string DecompilerJarPath { get; set; } = string.Empty;
+
+    /// <summary>Decompile every changed class in the background after a comparison.</summary>
+    public bool PrefetchDecompile { get; set; } = true;
+
+    /// <summary>Java processes used for background decompiling.</summary>
+    public int MaxDecompilerProcesses { get; set; } = 2;
+
+    /// <summary>Keep decompiled sources on disk across comparisons and restarts.</summary>
+    public bool DiskCacheEnabled { get; set; } = true;
+
+    public int DiskCacheMegabytes { get; set; } = 500;
+
+    /// <summary>Memory budget for unpacked nested WARs/JARs.</summary>
+    public int ArchiveCacheMegabytes { get; set; } = 256;
+
+    /// <summary>Rescan the compared EARs when they change on disk.</summary>
+    public bool AutoRefresh { get; set; }
 }
 
 public interface IUserSettingsStore
 {
     UserSettings Current { get; }
 
+    /// <summary>Full path of the settings file.</summary>
+    string FilePath { get; }
+
+    /// <summary>Raised after <see cref="Update"/> so features can apply new settings immediately.</summary>
+    event EventHandler? Changed;
+
+    /// <summary>Persists incidental state (last paths) without notifying anyone.</summary>
     void Save();
+
+    /// <summary>Applies <paramref name="change"/>, saves, and raises <see cref="Changed"/>.</summary>
+    void Update(Action<UserSettings> change);
 }
 
 /// <summary>Persists <see cref="UserSettings"/> to <c>%APPDATA%\Devscope\settings.json</c>.</summary>
@@ -46,6 +73,18 @@ public sealed partial class UserSettingsStore : IUserSettingsStore
     }
 
     public UserSettings Current { get; }
+
+    public string FilePath => _path;
+
+    public event EventHandler? Changed;
+
+    public void Update(Action<UserSettings> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        change(Current);
+        Save();
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
 
     public void Save()
     {

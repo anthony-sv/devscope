@@ -1,4 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+using Devscope.App.Services;
 
 namespace Devscope.App.ViewModels;
 
@@ -11,11 +13,14 @@ public interface IPage
     string Glyph { get; }
 }
 
-/// <summary>Shell view model: navigation between the tools.</summary>
+/// <summary>Shell view model: navigation between the tools, and the Settings window.</summary>
 public sealed partial class MainViewModel : ObservableObject
 {
-    public MainViewModel(EarDiffViewModel earDiff, LogsViewModel logs)
+    private readonly IDialogService _dialogs;
+
+    public MainViewModel(EarDiffViewModel earDiff, LogsViewModel logs, IDialogService dialogs)
     {
+        _dialogs = dialogs;
         Pages = [earDiff, logs];
         _selectedPage = earDiff;
     }
@@ -24,4 +29,7 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private IPage _selectedPage;
+
+    [RelayCommand]
+    private void OpenSettings() => _dialogs.ShowSettings();
 }

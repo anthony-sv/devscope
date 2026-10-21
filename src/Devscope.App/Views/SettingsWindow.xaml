@@ -1,0 +1,134 @@
+<Window x:Class="Devscope.App.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+        xmlns:ctl="clr-namespace:Devscope.App.Controls"
+        mc:Ignorable="d"
+        d:DataContext="{d:DesignInstance vm:SettingsViewModel}"
+        Title="Settings" Width="760" Height="720" MinWidth="560" MinHeight="420"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+  <Window.Resources>
+    <Style x:Key="Label" TargetType="TextBlock">
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="Margin" Value="0,8,12,0" />
+    </Style>
+    <Style x:Key="Number" TargetType="TextBox" BasedOn="{StaticResource {x:Type TextBox}}">
+      <Setter Property="Width" Value="90" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="Margin" Value="0,8,0,0" />
+    </Style>
+  </Window.Resources>
+
+  <DockPanel Margin="20">
+    <!-- Footer -->
+    <DockPanel DockPanel.Dock="Bottom" Margin="0,16,0,0">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Button Content="Cancel" Command="{Binding CancelCommand}" IsCancel="True" MinWidth="96" Margin="0,0,8,0" />
+        <Button Content="Save" Command="{Binding SaveCommand}" IsDefault="True" MinWidth="96" Style="{DynamicResource AccentButtonStyle}" />
+      </StackPanel>
+      <Button Style="{StaticResource IconButton}" Content="&#xE838;" ToolTip="Show settings.json in Explorer"
+              Command="{Binding RevealSettingsFileCommand}" DockPanel.Dock="Left" />
+      <TextBlock Text="{Binding SettingsFilePath}" Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center"
+                 Margin="6,0,12,0" TextTrimming="CharacterEllipsis" ToolTip="{Binding SettingsFilePath}" />
+    </DockPanel>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel>
+        <!-- Decompiler -->
+        <TextBlock Text="JAVA DECOMPILER" Style="{StaticResource SectionTitle}" />
+        <TextBlock Style="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap"
+                   Text="With Java 17+ and Vineflower available, .class files in the EAR diff are shown as Java source. Leave the paths empty to auto-detect." />
+        <Grid Margin="0,4,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0" Text="java.exe" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="0" Grid.Column="1" Margin="0,8,0,0" Text="{Binding JavaPath, UpdateSourceTrigger=PropertyChanged, Delay=300}"
+                   FontFamily="{StaticResource MonoFont}" ctl:Behaviors.AcceptsPathDrop="True" AutomationProperties.Name="Java executable path"
+                   ToolTip="Leave empty to use JAVA_HOME or PATH. Java 17 or newer." />
+          <Button Grid.Row="0" Grid.Column="2" Margin="4,8,0,0" Style="{StaticResource IconButton}" Content="&#xE8E5;" ToolTip="Pick java.exe"
+                  Command="{Binding BrowseJavaCommand}" />
+
+          <TextBlock Grid.Row="1" Text="Vineflower jar" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding DecompilerJarPath, UpdateSourceTrigger=PropertyChanged, Delay=300}"
+                   FontFamily="{StaticResource MonoFont}" ctl:Behaviors.AcceptsPathDrop="True" AutomationProperties.Name="Decompiler jar path"
+                   ToolTip="Leave empty to use vineflower*.jar next to Devscope.exe or in its tools folder." />
+          <Button Grid.Row="1" Grid.Column="2" Margin="4,8,0,0" Style="{StaticResource IconButton}" Content="&#xE8E5;" ToolTip="Pick decompiler jar"
+                  Command="{Binding BrowseDecompilerJarCommand}" />
+
+          <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,6,0,0" Text="{Binding DecompilerStatus}"
+                     TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}" />
+        </Grid>
+
+        <CheckBox Content="Decompile changed classes in the background after each comparison" IsChecked="{Binding PrefetchDecompile}" Margin="0,14,0,0"
+                  ToolTip="Classes are batched per JAR (one Java process each), so most rows are ready before you click them." />
+        <StackPanel Orientation="Horizontal">
+          <TextBlock Text="Parallel Java processes" Style="{StaticResource Label}" />
+          <TextBox Text="{Binding MaxDecompilerProcesses}" Style="{StaticResource Number}" AutomationProperties.Name="Parallel Java processes"
+                   ToolTip="1 to 8. Each process uses one CPU core and a few hundred MB while it runs." />
+        </StackPanel>
+
+        <!-- Caches -->
+        <TextBlock Text="CACHES" Style="{StaticResource SectionTitle}" Margin="0,24,0,6" />
+        <CheckBox Content="Keep decompiled sources on disk" IsChecked="{Binding DiskCacheEnabled}"
+                  ToolTip="Keyed by class content, so unchanged classes are never decompiled twice, even after a restart." />
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0" Text="Disk cache limit (MB)" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding DiskCacheMegabytes}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Disk cache limit in megabytes" ToolTip="Least recently used sources are deleted beyond this size." />
+          <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Margin="12,8,0,0">
+            <TextBlock Text="{Binding CacheUsage}" Style="{StaticResource Muted}" VerticalAlignment="Center" ToolTip="{Binding CacheFolder}" />
+            <Button Content="Clear" Command="{Binding ClearDiskCacheCommand}" Margin="10,0,0,0" />
+          </StackPanel>
+
+          <TextBlock Grid.Row="1" Text="Archive memory cache (MB)" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ArchiveCacheMegabytes}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Archive memory cache in megabytes"
+                   ToolTip="Nested WARs/JARs kept unpacked in memory, so selecting a row does not unpack them again. 0 turns it off." />
+        </Grid>
+
+        <!-- Logs -->
+        <TextBlock Text="LOGS" Style="{StaticResource SectionTitle}" Margin="0,24,0,6" />
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0" Text="Initial tail per file (MB)" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding InitialTailMegabytes}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Initial tail in megabytes" ToolTip="How much of the end of each log file is read when a session starts." />
+
+          <TextBlock Grid.Row="1" Text="Max files per path" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding MaxFilesPerSource}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Maximum files per path" ToolTip="Newest files first, when a workspace path is a folder." />
+        </Grid>
+        <TextBlock Text="Log settings apply the next time a workspace is opened." Style="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0" />
+      </StackPanel>
+    </ScrollViewer>
+  </DockPanel>
+</Window>

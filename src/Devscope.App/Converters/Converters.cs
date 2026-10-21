@@ -8,7 +8,7 @@ using Devscope.Core.Logs;
 namespace Devscope.App.Converters;
 
 /// <summary>Looks up a brush resource named after the enum value, e.g. <c>ErrorBrush</c> / <c>ErrorRowBrush</c>.</summary>
-/// <remarks>Set <see cref="Suffix"/> to pick a family of brushes ("Brush", "RowBrush", "LineBrush").</remarks>
+/// <remarks>Set <see cref="Suffix"/> to pick a family of brushes ("Brush", "RowBrush", "LeftLineBrush", ...).</remarks>
 public sealed class EnumToBrushConverter : IValueConverter
 {
     public string Suffix { get; set; } = "Brush";
@@ -25,6 +25,17 @@ public sealed class EnumToBrushConverter : IValueConverter
 
         return key is not null && Application.Current.TryFindResource(key + Suffix) is Brush brush ? brush : Brushes.Transparent;
     }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
+}
+
+/// <summary>Git-style gutter marker: <see cref="Marker"/> ("-" or "+") for a changed side of a diff line, otherwise empty.</summary>
+public sealed class DiffMarkerConverter : IValueConverter
+{
+    public string Marker { get; set; } = string.Empty;
+
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is DiffLineKind.Deleted or DiffLineKind.Inserted or DiffLineKind.Modified ? Marker : string.Empty;
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => throw new NotSupportedException();
 }

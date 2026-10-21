@@ -63,40 +63,20 @@
         <DockPanel Grid.Row="2" Grid.ColumnSpan="4" Margin="0,10,0,0">
           <ProgressBar DockPanel.Dock="Left" Width="120" Height="4" IsIndeterminate="True" Margin="0,0,10,0"
                        Visibility="{Binding CompareCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+          <TextBlock DockPanel.Dock="Right" Text="{Binding BackgroundStatus}" Style="{StaticResource Muted}" FontSize="12" Margin="12,0,0,0"
+                     VerticalAlignment="Center" Visibility="{Binding BackgroundStatus, Converter={StaticResource VisibleWhen}}" />
           <TextBlock Text="{Binding StatusText}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" />
         </DockPanel>
 
-        <!-- Optional decompiler: .class files are shown as Java source when Java + Vineflower are available. -->
-        <Expander Grid.Row="3" Grid.ColumnSpan="4" Margin="0,8,0,0" Header="{Binding DecompilerHeader}"
-                  AutomationProperties.Name="Java decompiler settings">
-          <Grid Margin="0,8,0,0">
-            <Grid.ColumnDefinitions>
-              <ColumnDefinition Width="Auto" />
-              <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-              <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
-
-            <TextBlock Grid.Row="0" Text="java.exe" VerticalAlignment="Center" Margin="0,0,12,0" />
-            <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding JavaPath, UpdateSourceTrigger=LostFocus}" FontFamily="{StaticResource MonoFont}"
-                     ctl:Behaviors.AcceptsPathDrop="True" AutomationProperties.Name="Java executable path"
-                     ToolTip="Leave empty to use JAVA_HOME or PATH. Java 17 or newer." />
-            <Button Grid.Row="0" Grid.Column="2" Style="{StaticResource IconButton}" Content="&#xE8E5;" ToolTip="Pick java.exe" Command="{Binding BrowseJavaCommand}" />
-
-            <TextBlock Grid.Row="1" Text="Vineflower jar" VerticalAlignment="Center" Margin="0,8,12,0" />
-            <TextBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="{Binding DecompilerJarPath, UpdateSourceTrigger=LostFocus}" FontFamily="{StaticResource MonoFont}"
-                     ctl:Behaviors.AcceptsPathDrop="True" AutomationProperties.Name="Decompiler jar path"
-                     ToolTip="Leave empty to use vineflower*.jar next to Devscope.exe or in its tools folder." />
-            <Button Grid.Row="1" Grid.Column="2" Margin="4,8,0,0" Style="{StaticResource IconButton}" Content="&#xE8E5;" ToolTip="Pick decompiler jar" Command="{Binding BrowseDecompilerJarCommand}" />
-
-            <TextBlock Grid.Row="2" Grid.ColumnSpan="3" Margin="0,8,0,0" Text="{Binding DecompilerStatus}" TextWrapping="Wrap" FontSize="12"
-                       Style="{StaticResource Muted}" />
-          </Grid>
-        </Expander>
+        <!-- Decompiler status (configured in Settings) and auto-refresh. -->
+        <DockPanel Grid.Row="3" Grid.ColumnSpan="4" Margin="0,8,0,0">
+          <CheckBox DockPanel.Dock="Right" Content="Auto-refresh" IsChecked="{Binding AutoRefresh}" VerticalAlignment="Center"
+                    ToolTip="Rescan when either side changes on disk (e.g. after a redeploy). Waits until the files stop changing first." />
+          <Button DockPanel.Dock="Left" Content="Settings…" Command="{Binding OpenSettingsCommand}" Margin="0,0,10,0"
+                  ToolTip="Java, Vineflower, background decompiling and caches" />
+          <TextBlock Text="{Binding DecompilerHeader}" ToolTip="{Binding DecompilerStatus}" Style="{StaticResource Muted}" FontSize="12"
+                     VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
       </Grid>
     </Border>
 
@@ -185,15 +165,42 @@
                 <Button Style="{StaticResource IconButton}" Content="&#xE70D;" ToolTip="Next change" Command="{Binding NextChangeCommand}" />
               </StackPanel>
               <StackPanel>
-                <TextBlock Text="{Binding SelectedRow.Name}" FontWeight="SemiBold" />
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Text="{Binding SelectedRow.Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+
+                  <!-- Git-style change counter: +12 -5 and a proportional five-square bar. -->
+                  <StackPanel Orientation="Horizontal" Margin="12,0,0,0" VerticalAlignment="Center" ToolTip="{Binding Detail.Summary}"
+                              Visibility="{Binding Detail.Stats.HasChanges, Converter={StaticResource VisibleWhen}}"
+                              AutomationProperties.Name="{Binding Detail.Summary}">
+                    <TextBlock Text="{Binding Detail.Stats.Additions, StringFormat='+{0:N0}'}" Foreground="{StaticResource AddedBrush}"
+                               FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding Detail.Stats.Deletions, StringFormat='-{0:N0}'}" Foreground="{StaticResource RemovedBrush}"
+                               FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" Margin="8,0,0,0" />
+                    <ItemsControl ItemsSource="{Binding Detail.Stats.Blocks}" Margin="8,0,0,0" VerticalAlignment="Center" Focusable="False">
+                      <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                          <StackPanel Orientation="Horizontal" />
+                        </ItemsPanelTemplate>
+                      </ItemsControl.ItemsPanel>
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <Border Width="8" Height="8" Margin="1,0" CornerRadius="1.5" Background="{Binding Converter={StaticResource BadgeBrush}}" />
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </StackPanel>
                 <TextBlock Text="{Binding Detail.Summary}" Style="{StaticResource Muted}" TextWrapping="Wrap" />
               </StackPanel>
             </DockPanel>
 
-            <!-- Side-by-side text diff; wrapped lines keep both halves aligned. -->
+            <!--
+              Side-by-side text diff; wrapped lines keep both halves aligned. Like git: old side red with "-",
+              new side green with "+", the changed words inside a modified line highlighted more strongly.
+            -->
             <ListBox ItemsSource="{Binding Detail.Lines}" SelectedItem="{Binding SelectedLine}"
                      Visibility="{Binding Detail.IsText, Converter={StaticResource VisibleWhen}}"
-                     ItemContainerStyle="{StaticResource DenseItem}"
+                     ItemContainerStyle="{StaticResource DiffLineItem}"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                      VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                      VirtualizingPanel.ScrollUnit="Pixel"
@@ -205,18 +212,32 @@
                   <Grid>
                     <Grid.ColumnDefinitions>
                       <ColumnDefinition Width="44" />
+                      <ColumnDefinition Width="16" />
                       <ColumnDefinition Width="*" />
                       <ColumnDefinition Width="44" />
+                      <ColumnDefinition Width="16" />
                       <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{Binding LeftKind, Converter={StaticResource LineBrush}}" />
-                    <Border Grid.Column="2" Grid.ColumnSpan="2" Background="{Binding RightKind, Converter={StaticResource LineBrush}}" />
+                    <Border Grid.Column="0" Grid.ColumnSpan="3" Background="{Binding LeftKind, Converter={StaticResource LeftLineBrush}}" />
+                    <Border Grid.Column="0" Grid.ColumnSpan="2" Background="{Binding LeftKind, Converter={StaticResource LeftGutterBrush}}" />
+                    <Border Grid.Column="3" Grid.ColumnSpan="3" Background="{Binding RightKind, Converter={StaticResource RightLineBrush}}" />
+                    <Border Grid.Column="3" Grid.ColumnSpan="2" Background="{Binding RightKind, Converter={StaticResource RightGutterBrush}}" />
+
                     <TextBlock Grid.Column="0" Text="{Binding LeftNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                               TextAlignment="Right" Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="1" Text="{Binding LeftText}" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="2" Text="{Binding RightNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
-                               TextAlignment="Right" Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="3" Text="{Binding RightText}" Style="{StaticResource MonoText}" TextWrapping="Wrap" />
+                               TextAlignment="Right" Margin="0,0,6,0" />
+                    <TextBlock Grid.Column="1" Text="{Binding LeftKind, Converter={StaticResource LeftMarker}}" Style="{StaticResource MonoText}"
+                               Foreground="{StaticResource DeletedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
+                    <TextBlock Grid.Column="2" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,8,0"
+                               ctl:DiffText.Text="{Binding LeftText}" ctl:DiffText.Spans="{Binding LeftSpans}"
+                               ctl:DiffText.ChangedBrush="{StaticResource DeletedWordBrush}" />
+
+                    <TextBlock Grid.Column="3" Text="{Binding RightNumber}" Style="{StaticResource MonoText}" Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                               TextAlignment="Right" Margin="0,0,6,0" />
+                    <TextBlock Grid.Column="4" Text="{Binding RightKind, Converter={StaticResource RightMarker}}" Style="{StaticResource MonoText}"
+                               Foreground="{StaticResource InsertedMarkerBrush}" FontWeight="Bold" TextAlignment="Center" />
+                    <TextBlock Grid.Column="5" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="2,0,0,0"
+                               ctl:DiffText.Text="{Binding RightText}" ctl:DiffText.Spans="{Binding RightSpans}"
+                               ctl:DiffText.ChangedBrush="{StaticResource InsertedWordBrush}" />
                   </Grid>
                 </DataTemplate>
               </ListBox.ItemTemplate>

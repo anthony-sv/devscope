@@ -2,6 +2,7 @@ using System.Windows;
 using Devscope.App.ViewModels;
 using Devscope.App.Views;
 using Devscope.Core.Workspaces;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
 
 namespace Devscope.App.Services;
@@ -21,9 +22,12 @@ public interface IDialogService
 
     /// <summary>Opens the workspace editor. Returns the edited copy, or null when cancelled.</summary>
     Workspace? EditWorkspace(Workspace workspace);
+
+    /// <summary>Opens the Settings window; saved changes are applied through <see cref="IUserSettingsStore.Changed"/>.</summary>
+    void ShowSettings();
 }
 
-public sealed class DialogService : IDialogService
+public sealed class DialogService(IServiceProvider services) : IDialogService
 {
     public string? PickFile(string title, string filter)
     {
@@ -54,6 +58,12 @@ public sealed class DialogService : IDialogService
         var viewModel = new WorkspaceEditorViewModel(workspace, this);
         var window = new WorkspaceEditorWindow { DataContext = viewModel, Owner = Owner };
         return window.ShowDialog() == true ? viewModel.ToModel() : null;
+    }
+
+    public void ShowSettings()
+    {
+        var window = new SettingsWindow { DataContext = services.GetRequiredService<SettingsViewModel>(), Owner = Owner };
+        window.ShowDialog();
     }
 
     private static Window Owner => Application.Current.MainWindow;

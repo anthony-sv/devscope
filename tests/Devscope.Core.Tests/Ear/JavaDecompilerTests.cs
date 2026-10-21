@@ -1,4 +1,4 @@
-using Devscope.Core.Ear;
+﻿using Devscope.Core.Ear;
 
 namespace Devscope.Core.Tests.Ear;
 
@@ -59,6 +59,24 @@ public sealed class JavaDecompilerTests : IDisposable
         Assert.StartsWith("Decompiled with Vineflower · ", diff.Summary, StringComparison.Ordinal);
         Assert.Contains(diff.Lines, l => l.LeftText.Contains("retries = 3", StringComparison.Ordinal) && l.RightText.Contains("retries = 5", StringComparison.Ordinal));
         Assert.Contains(diff.Lines, l => l.RightKind == DiffLineKind.Inserted && l.RightText.Contains("postedCount", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task DecompileManyAsync_SeveralGroups_OneResultPerGroupFromTheRightBytes()
+    {
+        var setup = RequireDecompiler();
+
+        // Same qualified class in two folders: Vineflower would skip the second one if both ran in one process.
+        static ClassGroup Group(string folder, string version) => new(
+            $"{folder}/com/acme/billing/InvoiceService.class",
+            ClassFiles(version).ToDictionary(f => $"{folder}/com/acme/billing/{f.Key}", f => f.Value));
+
+        var sources = await new VineflowerDecompiler().DecompileManyAsync(
+            setup, [Group("WEB-INF/classes", "v1"), Group("lib", "v2")], TestContext.Current.CancellationToken);
+
+        Assert.Equal(2, sources.Count);
+        Assert.Contains("retries = 3", sources["WEB-INF/classes/com/acme/billing/InvoiceService.class"], StringComparison.Ordinal);
+        Assert.Contains("retries = 5", sources["lib/com/acme/billing/InvoiceService.class"], StringComparison.Ordinal);
     }
 
     [Fact]

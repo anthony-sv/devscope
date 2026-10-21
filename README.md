@@ -16,6 +16,9 @@ Everything runs locally. Files are read in place from local disks or `\\server\s
 - A re-packaged jar with identical content is reported as unchanged: an archive's status comes from its children.
 - **Side-by-side text diff** for xml/properties/jsp/MANIFEST and similar files, with next/previous-change navigation.
 - **Changed `.class` files are decompiled** with [Vineflower](https://github.com/Vineflower/vineflower) (Apache-2.0) and diffed as Java source. Inner classes are included, and a Java target change (e.g. Java 17 → 21) is called out. Decompiling runs as a local `java` process on a private temp copy of the class bytes, which is deleted afterwards. If Java or the jar is missing, you get a size/Java-version summary instead.
+- **Background decompiling**: after a comparison, every changed class is decompiled in the background, batched per JAR so one `java` process handles many classes. Most rows are ready before you click them, and the row you click is never queued behind the batch.
+- **Caches**: nested WARs/JARs stay unpacked in memory (bounded, 256 MB by default), so selecting rows doesn't re-inflate them. Decompiled sources are kept on disk under `%LOCALAPPDATA%\Devscope\cache`, keyed by the class bytes, so an unchanged class is never decompiled twice, even after a restart.
+- **Auto-refresh**: rescans when either side changes on disk, for example after a redeploy. It waits until the files have stopped changing, keeps your selection, and keeps the open diff when that file didn't change. Network shares are polled, because file change events aren't reliable there.
 - Filter by path, show or hide unchanged files, export the differences to CSV. You can drag and drop files onto the path boxes.
 
 ### Logs
@@ -26,7 +29,7 @@ Everything runs locally. Files are read in place from local disks or `\\server\s
 - **Live tail** (like `tail -F`): handles rotation and truncation. Files are opened only during each poll, with full sharing, so the writing app is never blocked. Follow and pause are supported.
 - Filters: text or regex search (regex runs on the non-backtracking engine, so it's safe), exclude, severity chips and environment chips, each with counts.
 - **Colours**: tinted rows by severity, search hits highlighted, and per-workspace highlight rules (text or regex → colour).
-- On start it reads only the last 4 MB of each file and the newest 50 files per path. Both limits can be changed in `settings.json`.
+- On start it reads only the last 4 MB of each file and the newest 50 files per path. Both limits can be changed in **Settings**.
 
 ## Architecture
 
@@ -63,7 +66,7 @@ Needs **Java 17+** and the Vineflower jar:
 ./tools/Get-Vineflower.ps1   # downloads vineflower-1.12.0.jar from Maven Central, verifies SHA-1
 ```
 
-The build copies the jar to `tools\` next to `Devscope.exe`, where it is found automatically. Java is found through `JAVA_HOME` or `PATH`. Either one can be overridden in the "Java decompiler" section of the EAR diff page.
+The build copies the jar to `tools\` next to `Devscope.exe`, where it is found automatically. Java is found through `JAVA_HOME` or `PATH`. Either one can be overridden in **Settings** (the gear at the bottom of the navigation rail, or `Ctrl+,`). Settings also cover background decompiling, cache sizes and the log read limits. Everything is stored in `%APPDATA%\Devscope\settings.json`.
 
 ## Download
 

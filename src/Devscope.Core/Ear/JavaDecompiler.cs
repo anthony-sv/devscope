@@ -18,7 +18,19 @@ public interface IJavaDecompiler
     /// inner classes (<c>Foo$Bar.class</c>) by file name, so nested types appear in the output.
     /// </summary>
     Task<string> DecompileAsync(DecompilerSetup setup, string mainClassFile, IReadOnlyDictionary<string, byte[]> classFiles, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Decompiles several classes in as few runs as possible (one Java process each), which is much faster than
+    /// one call per class. Returns source by <see cref="ClassGroup.MainClassPath"/>; groups the decompiler
+    /// produced nothing for are missing from the result.
+    /// </summary>
+    Task<IReadOnlyDictionary<string, string>> DecompileManyAsync(DecompilerSetup setup, IReadOnlyList<ClassGroup> groups, CancellationToken cancellationToken);
 }
+
+/// <summary>A class to decompile together with its inner classes.</summary>
+/// <param name="MainClassPath">Relative path of the main class, e.g. <c>com/acme/Foo.class</c>; unique within one batch.</param>
+/// <param name="ClassFiles">The main class and its inner classes by relative path.</param>
+public sealed record ClassGroup(string MainClassPath, IReadOnlyDictionary<string, byte[]> ClassFiles);
 
 /// <summary>Finds java.exe and the decompiler jar from explicit settings or well-known locations.</summary>
 public static class DecompilerLocator
@@ -110,32 +122,83 @@ public sealed class VineflowerDecompiler : IJavaDecompiler
     /// <summary>Upper bound for one decompilation, so a pathological class cannot hang the UI.</summary>
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>Extra time allowed per class in a batch, on top of <see cref="Timeout"/>.</summary>
+    public static readonly TimeSpan TimeoutPerClass = TimeSpan.FromSeconds(2);
+
     /// <inheritdoc />
     public async Task<string> DecompileAsync(DecompilerSetup setup, string mainClassFile, IReadOnlyDictionary<string, byte[]> classFiles, CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(setup);
         ArgumentNullException.ThrowIfNull(classFiles);
+
+        // File names only: the main class and its inner classes share one folder.
+        var group = new ClassGroup(
+            Path.GetFileName(mainClassFile),
+            classFiles.ToDictionary(f => Path.GetFileName(f.Key), f => f.Value, StringComparer.Ordinal));
+        var (sources, stderr) = await RunBatchAsync(setup, [group], cancellationToken).ConfigureAwait(false);
+        return sources.TryGetValue(group.MainClassPath, out var source)
+            ? source
+            : throw new InvalidOperationException($"The decompiler produced no output. {stderr}".Trim());
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> DecompileManyAsync(DecompilerSetup setup, IReadOnlyList<ClassGroup> groups, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(groups);
+
+        var results = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var batch in SplitConflicting(groups))
+        {
+            var (sources, _) = await RunBatchAsync(setup, batch, cancellationToken).ConfigureAwait(false);
+            foreach (var (path, source) in sources)
+            {
+                results[path] = source;
+            }
+        }
+
+        return results;
+    }
+
+    private static async Task<(Dictionary<string, string> Sources, string Stderr)> RunBatchAsync(
+        DecompilerSetup setup, List<ClassGroup> groups, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(setup);
 
         var work = Path.Combine(Path.GetTempPath(), "Devscope", "decompile", Guid.NewGuid().ToString("N"));
         var input = Directory.CreateDirectory(Path.Combine(work, "in")).FullName;
         var output = Directory.CreateDirectory(Path.Combine(work, "out")).FullName;
         try
         {
-            foreach (var (name, bytes) in classFiles)
+            foreach (var (path, bytes) in groups.SelectMany(g => g.ClassFiles))
             {
-                // File names only: never let an archive entry name escape the temp folder.
-                await File.WriteAllBytesAsync(Path.Combine(input, Path.GetFileName(name)), bytes, cancellationToken).ConfigureAwait(false);
+                var target = Path.Combine(input, SafeRelativePath(path));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                await File.WriteAllBytesAsync(target, bytes, cancellationToken).ConfigureAwait(false);
             }
 
-            var stderr = await RunAsync(setup, input, output, cancellationToken).ConfigureAwait(false);
+            var timeout = Timeout + (TimeoutPerClass * groups.Count);
+            var stderr = await RunAsync(setup, input, output, timeout, cancellationToken).ConfigureAwait(false);
 
-            var expected = Path.GetFileNameWithoutExtension(mainClassFile) + ".java";
-            var files = Directory.EnumerateFiles(output, "*.java", SearchOption.AllDirectories).ToList();
-            var source = files.FirstOrDefault(f => string.Equals(Path.GetFileName(f), expected, StringComparison.Ordinal))
-                ?? files.FirstOrDefault()
-                ?? throw new InvalidOperationException($"The decompiler produced no output. {stderr}".Trim());
+            // Vineflower mirrors the input folders, so out/com/acme/Foo.java belongs to in/com/acme/Foo.class.
+            var produced = Directory.EnumerateFiles(output, "*.java", SearchOption.AllDirectories)
+                .ToDictionary(f => Stem(Path.GetRelativePath(output, f)), StringComparer.OrdinalIgnoreCase);
+            var sources = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (var group in groups)
+            {
+                var file = produced.GetValueOrDefault(Stem(SafeRelativePath(group.MainClassPath)));
+                if (file is null && groups.Count == 1)
+                {
+                    var expected = Path.GetFileNameWithoutExtension(group.MainClassPath) + ".java";
+                    file = produced.Values.FirstOrDefault(f => string.Equals(Path.GetFileName(f), expected, StringComparison.Ordinal))
+                        ?? produced.Values.FirstOrDefault();
+                }
 
-            return await File.ReadAllTextAsync(source, cancellationToken).ConfigureAwait(false);
+                if (file is not null)
+                {
+                    sources[group.MainClassPath] = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            return (sources, stderr);
         }
         finally
         {
@@ -143,7 +206,44 @@ public sealed class VineflowerDecompiler : IJavaDecompiler
         }
     }
 
-    private static async Task<string> RunAsync(DecompilerSetup setup, string input, string output, CancellationToken cancellationToken)
+    /// <summary>
+    /// Vineflower skips a class whose qualified name it already saw in the same run, and that name is not known
+    /// without parsing the bytes; groups sharing a file name (implied by a shared qualified name) run separately.
+    /// </summary>
+    private static List<List<ClassGroup>> SplitConflicting(IReadOnlyList<ClassGroup> groups)
+    {
+        var batches = new List<(HashSet<string> Names, List<ClassGroup> Groups)>();
+        foreach (var group in groups)
+        {
+            var names = group.ClassFiles.Keys.Select(Path.GetFileName).OfType<string>().ToList();
+            var index = batches.FindIndex(b => !names.Any(b.Names.Contains));
+            if (index < 0)
+            {
+                batches.Add((new HashSet<string>(StringComparer.OrdinalIgnoreCase), []));
+                index = batches.Count - 1;
+            }
+
+            batches[index].Names.UnionWith(names);
+            batches[index].Groups.Add(group);
+        }
+
+        return batches.ConvertAll(b => b.Groups);
+    }
+
+    /// <summary>Never lets an archive entry name escape the temp folder.</summary>
+    private static string SafeRelativePath(string path)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var segments = path.Split('/', '\\')
+            .Where(s => s.Length > 0 && s != "." && s != "..")
+            .Select(s => string.Concat(s.Select(c => invalid.Contains(c) ? '_' : c)));
+        return Path.Combine([.. segments]);
+    }
+
+    private static string Stem(string relativePath) =>
+        Path.ChangeExtension(relativePath, null).Replace('\\', '/');
+
+    private static async Task<string> RunAsync(DecompilerSetup setup, string input, string output, TimeSpan timeoutAfter, CancellationToken cancellationToken)
     {
         var startInfo = new ProcessStartInfo(setup.JavaPath)
         {
@@ -170,7 +270,7 @@ public sealed class VineflowerDecompiler : IJavaDecompiler
         }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(Timeout);
+        timeout.CancelAfter(timeoutAfter);
 
         // Drain both pipes concurrently so a chatty process cannot block on a full buffer.
         var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
@@ -187,7 +287,7 @@ public sealed class VineflowerDecompiler : IJavaDecompiler
                 throw;
             }
 
-            throw new TimeoutException($"Decompiling took longer than {Timeout.TotalSeconds:N0}s and was stopped.");
+            throw new TimeoutException($"Decompiling took longer than {timeoutAfter.TotalSeconds:N0}s and was stopped.");
         }
 
         await stdoutTask.ConfigureAwait(false);

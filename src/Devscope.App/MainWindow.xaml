@@ -19,6 +19,9 @@
       <views:LogsView />
     </DataTemplate>
   </Window.Resources>
+  <Window.InputBindings>
+    <KeyBinding Key="OemComma" Modifiers="Control" Command="{Binding OpenSettingsCommand}" />
+  </Window.InputBindings>
 
   <Grid>
     <Grid.ColumnDefinitions>
@@ -31,6 +34,14 @@
       <DockPanel Width="76">
         <TextBlock DockPanel.Dock="Top" Text="devscope" FontWeight="Bold" FontSize="12"
                    HorizontalAlignment="Center" Margin="0,14,0,10" Style="{StaticResource Muted}" />
+        <Button DockPanel.Dock="Bottom" Command="{Binding OpenSettingsCommand}" Margin="6,0,6,10" Padding="4,8"
+                HorizontalAlignment="Stretch" Background="Transparent" BorderThickness="0"
+                ToolTip="Settings (Ctrl+,)" AutomationProperties.Name="Settings">
+          <StackPanel>
+            <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="20" HorizontalAlignment="Center" />
+            <TextBlock Text="Settings" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0" />
+          </StackPanel>
+        </Button>
         <ListBox ItemsSource="{Binding Pages}" SelectedItem="{Binding SelectedPage}"
                  BorderThickness="0" Background="Transparent" Padding="4,0"
                  AutomationProperties.Name="Navigation">

@@ -28,6 +28,7 @@ public partial class App : Application
 
         _host = BuildHost();
         await _host.StartAsync();
+        ApplySettings(_host.Services);
 
         var window = _host.Services.GetRequiredService<MainWindow>();
         MainWindow = window;
@@ -58,9 +59,13 @@ public partial class App : Application
         var services = builder.Services;
 
         // Core engine
-        services.AddSingleton<IArchiveScanner, ArchiveScanner>();
+        services.AddSingleton<ArchiveScanner>();
+        services.AddSingleton<IArchiveScanner>(sp => sp.GetRequiredService<ArchiveScanner>());
         services.AddSingleton<IEarComparer, EarComparer>();
-        services.AddSingleton<IJavaDecompiler, VineflowerDecompiler>();
+        services.AddSingleton(new DecompiledSourceCache(Path.Combine(LocalDataFolder, "cache", "decompiled"), maxBytes: 0));
+        services.AddSingleton<VineflowerDecompiler>();
+        services.AddSingleton<IJavaDecompiler>(sp => new CachingJavaDecompiler(
+            sp.GetRequiredService<VineflowerDecompiler>(), sp.GetRequiredService<DecompiledSourceCache>()));
         services.AddSingleton<ILogSessionFactory, LogSessionFactory>();
         services.AddSingleton<IWorkspaceStore>(sp =>
             new JsonWorkspaceStore(JsonWorkspaceStore.DefaultFilePath, sp.GetRequiredService<ILogger<JsonWorkspaceStore>>()));
@@ -74,9 +79,30 @@ public partial class App : Application
         services.AddSingleton<EarDiffViewModel>();
         services.AddSingleton<LogsViewModel>();
         services.AddSingleton<MainViewModel>();
+        services.AddTransient<SettingsViewModel>();
         services.AddSingleton<MainWindow>();
 
         return builder.Build();
+    }
+
+    /// <summary>Pushes cache settings into the engine now and whenever the Settings window saves.</summary>
+    private static void ApplySettings(IServiceProvider services)
+    {
+        var store = services.GetRequiredService<IUserSettingsStore>();
+        var scanner = services.GetRequiredService<ArchiveScanner>();
+        var cache = services.GetRequiredService<DecompiledSourceCache>();
+
+        void Apply()
+        {
+            var settings = store.Current;
+            scanner.CacheCapacityBytes = Math.Max(0, settings.ArchiveCacheMegabytes) * 1024L * 1024L;
+            cache.Enabled = settings.DiskCacheEnabled;
+            cache.MaxBytes = Math.Max(1, settings.DiskCacheMegabytes) * 1024L * 1024L;
+            _ = Task.Run(cache.Trim);
+        }
+
+        Apply();
+        store.Changed += (_, _) => Apply();
     }
 
     private void RegisterCrashHandlers()

@@ -4,7 +4,12 @@
 
   <conv:EnumToBrushConverter x:Key="BadgeBrush" Suffix="Brush" />
   <conv:EnumToBrushConverter x:Key="RowBrush" Suffix="RowBrush" />
-  <conv:EnumToBrushConverter x:Key="LineBrush" Suffix="LineBrush" />
+  <conv:EnumToBrushConverter x:Key="LeftLineBrush" Suffix="LeftLineBrush" />
+  <conv:EnumToBrushConverter x:Key="RightLineBrush" Suffix="RightLineBrush" />
+  <conv:EnumToBrushConverter x:Key="LeftGutterBrush" Suffix="LeftGutterBrush" />
+  <conv:EnumToBrushConverter x:Key="RightGutterBrush" Suffix="RightGutterBrush" />
+  <conv:DiffMarkerConverter x:Key="LeftMarker" Marker="-" />
+  <conv:DiffMarkerConverter x:Key="RightMarker" Marker="+" />
   <conv:IndexToBrushConverter x:Key="IndexBrush" />
   <conv:SeverityLabelConverter x:Key="SeverityLabel" />
   <conv:TimestampConverter x:Key="Timestamp" />
@@ -87,5 +92,40 @@
     <Setter Property="Margin" Value="0" />
     <Setter Property="MinHeight" Value="0" />
     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+  </Style>
+
+  <!--
+    Side-by-side diff rows. The selection is an accent outline with a bar on the left instead of a fill, so the
+    selected line (the current change, when navigating) keeps showing what kind of change it is.
+  -->
+  <Style x:Key="DiffLineItem" TargetType="ListBoxItem">
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="Margin" Value="0" />
+    <Setter Property="MinHeight" Value="0" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <Grid Background="Transparent">
+            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+            <Border x:Name="Hover" Background="#808080" Opacity="0.08" Visibility="Collapsed" IsHitTestVisible="False" />
+            <Border x:Name="Outline" BorderThickness="1" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                    Visibility="Collapsed" IsHitTestVisible="False" />
+            <Border x:Name="Bar" Width="3" HorizontalAlignment="Left" Background="{DynamicResource AccentFillColorDefaultBrush}"
+                    Visibility="Collapsed" IsHitTestVisible="False" />
+          </Grid>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Hover" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Outline" Property="Visibility" Value="Visible" />
+              <Setter TargetName="Bar" Property="Visibility" Value="Visible" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 </ResourceDictionary>

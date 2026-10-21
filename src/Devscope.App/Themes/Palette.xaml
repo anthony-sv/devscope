@@ -24,8 +24,29 @@
   <SolidColorBrush x:Key="ModifiedBrush" Color="#BF8700" />
   <SolidColorBrush x:Key="UnchangedBrush" Color="#8A8A8A" />
 
-  <SolidColorBrush x:Key="InsertedLineBrush" Color="#332DA44E" />
-  <SolidColorBrush x:Key="DeletedLineBrush" Color="#33CF222E" />
-  <SolidColorBrush x:Key="ModifiedLineBrush" Color="#33BF8700" />
-  <SolidColorBrush x:Key="ImaginaryLineBrush" Color="#14808080" />
+  <!--
+    Side-by-side diff, using git's convention: the old (left) side of a deleted or modified line is red, the new
+    (right) side of an inserted or modified line is green. Keys are <DiffLineKind><Side><Part>; a missing key
+    (e.g. an unchanged line) means no background. Translucent, so they read on light and dark themes alike.
+  -->
+  <Color x:Key="DiffRedColor">#F85149</Color>
+  <Color x:Key="DiffGreenColor">#3FB950</Color>
+  <SolidColorBrush x:Key="DeletedLeftLineBrush" Color="{StaticResource DiffRedColor}" Opacity="0.15" />
+  <SolidColorBrush x:Key="ModifiedLeftLineBrush" Color="{StaticResource DiffRedColor}" Opacity="0.15" />
+  <SolidColorBrush x:Key="InsertedRightLineBrush" Color="{StaticResource DiffGreenColor}" Opacity="0.15" />
+  <SolidColorBrush x:Key="ModifiedRightLineBrush" Color="{StaticResource DiffGreenColor}" Opacity="0.15" />
+  <SolidColorBrush x:Key="DeletedLeftGutterBrush" Color="{StaticResource DiffRedColor}" Opacity="0.28" />
+  <SolidColorBrush x:Key="ModifiedLeftGutterBrush" Color="{StaticResource DiffRedColor}" Opacity="0.28" />
+  <SolidColorBrush x:Key="InsertedRightGutterBrush" Color="{StaticResource DiffGreenColor}" Opacity="0.28" />
+  <SolidColorBrush x:Key="ModifiedRightGutterBrush" Color="{StaticResource DiffGreenColor}" Opacity="0.28" />
+  <!-- Padding opposite an inserted or deleted line: neutral, so it never looks like a change of its own. -->
+  <SolidColorBrush x:Key="ImaginaryLeftLineBrush" Color="#808080" Opacity="0.08" />
+  <SolidColorBrush x:Key="ImaginaryRightLineBrush" Color="#808080" Opacity="0.08" />
+  <SolidColorBrush x:Key="ImaginaryLeftGutterBrush" Color="#808080" Opacity="0.08" />
+  <SolidColorBrush x:Key="ImaginaryRightGutterBrush" Color="#808080" Opacity="0.08" />
+  <!-- The words that actually changed inside a modified line. -->
+  <SolidColorBrush x:Key="DeletedWordBrush" Color="{StaticResource DiffRedColor}" Opacity="0.45" />
+  <SolidColorBrush x:Key="InsertedWordBrush" Color="{StaticResource DiffGreenColor}" Opacity="0.45" />
+  <SolidColorBrush x:Key="DeletedMarkerBrush" Color="{StaticResource DiffRedColor}" />
+  <SolidColorBrush x:Key="InsertedMarkerBrush" Color="{StaticResource DiffGreenColor}" />
 </ResourceDictionary>
