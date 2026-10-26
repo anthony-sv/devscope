@@ -30,6 +30,21 @@ public static class Behaviors
     /// <summary>Narrowest the <see cref="FillColumnProperty"/> column gets; below that the list scrolls sideways.</summary>
     public const double MinFillColumnWidth = 160;
 
+    /// <summary>
+    /// Two-way binding for <see cref="PasswordBox.Password"/>, which is not a dependency property. The default is null,
+    /// so the first bound value (even an empty one) hooks the box up.
+    /// </summary>
+    public static readonly DependencyProperty PasswordProperty = DependencyProperty.RegisterAttached(
+        "Password", typeof(string), typeof(Behaviors),
+        new FrameworkPropertyMetadata(null, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault, OnPasswordChanged));
+
+    private static readonly DependencyProperty IsUpdatingPasswordProperty = DependencyProperty.RegisterAttached(
+        "IsUpdatingPassword", typeof(bool), typeof(Behaviors), new PropertyMetadata(false));
+
+    public static string? GetPassword(DependencyObject element) => (string?)element.GetValue(PasswordProperty);
+
+    public static void SetPassword(DependencyObject element, string? value) => element.SetValue(PasswordProperty, value);
+
     public static int GetFillColumn(DependencyObject element) => (int)element.GetValue(FillColumnProperty);
 
     public static void SetFillColumn(DependencyObject element, int value) => element.SetValue(FillColumnProperty, value);
@@ -136,6 +151,36 @@ public static class Behaviors
         // Leaves room for the vertical scroll bar and the borders, so no horizontal scroll bar appears.
         var available = list.ActualWidth - others - SystemParameters.VerticalScrollBarWidth - 8;
         view.Columns[index].Width = Math.Max(MinFillColumnWidth, available);
+    }
+
+    private static void OnPasswordChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is not PasswordBox box)
+        {
+            return;
+        }
+
+        box.PasswordChanged -= OnPasswordBoxChanged;
+        if (!(bool)box.GetValue(IsUpdatingPasswordProperty))
+        {
+            box.Password = (string?)e.NewValue ?? string.Empty;
+        }
+
+        box.PasswordChanged += OnPasswordBoxChanged;
+    }
+
+    private static void OnPasswordBoxChanged(object sender, RoutedEventArgs e)
+    {
+        var box = (PasswordBox)sender;
+        box.SetValue(IsUpdatingPasswordProperty, true);
+        try
+        {
+            SetPassword(box, box.Password);
+        }
+        finally
+        {
+            box.SetValue(IsUpdatingPasswordProperty, false);
+        }
     }
 
     private static void OnAcceptsPathDropChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

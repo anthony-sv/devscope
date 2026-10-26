@@ -128,6 +128,31 @@
                    AutomationProperties.Name="Maximum files per path" ToolTip="Newest files first, when a workspace path is a folder." />
         </Grid>
         <TextBlock Text="Log settings apply the next time a workspace is opened." Style="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0" />
+
+        <!-- Database diff -->
+        <TextBlock Text="DATABASE DIFF" Style="{StaticResource SectionTitle}" Margin="0,24,0,6" />
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+
+          <TextBlock Grid.Row="0" Text="Example rows per kind" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding DbSampleRows}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Example rows per kind of difference"
+                   ToolTip="Differing rows kept per table and kind (only in left, only in right, changed), shown and scripted. 10 to 100,000; every difference is still counted." />
+
+          <TextBlock Grid.Row="1" Text="Rows held in memory" Style="{StaticResource Label}" />
+          <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding DbMaxInMemoryRows}" Style="{StaticResource Number}"
+                   AutomationProperties.Name="Rows held in memory without a usable key"
+                   ToolTip="Only for tables without a key both servers sort the same way: their rows are matched in memory, up to this many." />
+        </Grid>
+        <TextBlock Text="Tables with a primary key or unique index are streamed in key order and need almost no memory, whatever their size."
+                   Style="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" />
       </StackPanel>
     </ScrollViewer>
   </DockPanel>

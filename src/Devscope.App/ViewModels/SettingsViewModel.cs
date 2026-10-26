@@ -30,6 +30,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         _archiveCacheMegabytes = current.ArchiveCacheMegabytes;
         _initialTailMegabytes = current.InitialTailMegabytes;
         _maxFilesPerSource = current.MaxFilesPerSource;
+        _dbSampleRows = current.DbSampleRows;
+        _dbMaxInMemoryRows = current.DbMaxInMemoryRows;
         CheckDecompiler();
         _ = RefreshCacheUsageAsync();
     }
@@ -70,6 +72,12 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     [ObservableProperty]
     private int _maxFilesPerSource;
+
+    [ObservableProperty]
+    private int _dbSampleRows;
+
+    [ObservableProperty]
+    private int _dbMaxInMemoryRows;
 
     [ObservableProperty]
     private string _cacheUsage = "Measuring…";
@@ -117,6 +125,8 @@ public sealed partial class SettingsViewModel : ObservableObject
             s.ArchiveCacheMegabytes = Math.Clamp(ArchiveCacheMegabytes, 0, 16_384);
             s.InitialTailMegabytes = Math.Clamp(InitialTailMegabytes, 1, 1024);
             s.MaxFilesPerSource = Math.Clamp(MaxFilesPerSource, 1, 10_000);
+            s.DbSampleRows = Math.Clamp(DbSampleRows, 10, 100_000);
+            s.DbMaxInMemoryRows = Math.Clamp(DbMaxInMemoryRows, 10_000, 100_000_000);
         });
         CloseRequested?.Invoke(this, true);
     }

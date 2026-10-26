@@ -1,0 +1,594 @@
+<UserControl x:Class="Devscope.App.Views.DbDiffView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:vm="clr-namespace:Devscope.App.ViewModels"
+             xmlns:ctl="clr-namespace:Devscope.App.Controls"
+             mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:DbDiffViewModel}"
+             d:DesignWidth="1300" d:DesignHeight="800">
+  <UserControl.Resources>
+    <!-- Object rows look like the EAR diff's: the selected row keeps a fill, an outline, a bar and an eye icon. -->
+    <Style x:Key="ObjectRowItem" TargetType="ListViewItem">
+      <Setter Property="AutomationProperties.Name" Value="{Binding FullName}" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListViewItem">
+            <Grid Background="Transparent">
+              <Border x:Name="Fill" Background="{DynamicResource AccentFillColorDefaultBrush}" Opacity="0.22" Visibility="Collapsed" />
+              <Border x:Name="Hover" Background="#808080" Opacity="0.10" Visibility="Collapsed" />
+              <GridViewRowPresenter Margin="0,4" Columns="{TemplateBinding GridView.ColumnCollection}" Content="{TemplateBinding Content}"
+                                    VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+              <Border x:Name="Outline" BorderThickness="1.5" BorderBrush="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+              <Border x:Name="Bar" Width="5" HorizontalAlignment="Left" Background="{DynamicResource AccentFillColorDefaultBrush}" Visibility="Collapsed" />
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Hover" Property="Visibility" Value="Visible" />
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Fill" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Outline" Property="Visibility" Value="Visible" />
+                <Setter TargetName="Bar" Property="Visibility" Value="Visible" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <DataTemplate x:Key="ConnectionItem">
+      <StackPanel Orientation="Horizontal">
+        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+        <TextBlock Text="{Binding Target}" Style="{StaticResource Muted}" Margin="10,0,0,0" FontFamily="{StaticResource MonoFont}" FontSize="12"
+                   VerticalAlignment="Center" />
+      </StackPanel>
+    </DataTemplate>
+
+    <!-- Row counts from metadata stand out when the two sides differ: a quick hint that rows are missing. -->
+    <Style x:Key="RowCount" TargetType="TextBlock">
+      <Setter Property="HorizontalAlignment" Value="Right" />
+      <Setter Property="ToolTip" Value="Rows from metadata (approximate). Compare the data for exact counts." />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding RowCountsDiffer}" Value="True">
+          <Setter Property="Foreground" Value="{StaticResource ModifiedBrush}" />
+          <Setter Property="FontWeight" Value="SemiBold" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DataCell" TargetType="TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="12" />
+      <Style.Triggers>
+        <DataTrigger Binding="{Binding DataState}" Value="{x:Static vm:DataState.Different}">
+          <Setter Property="Foreground" Value="{StaticResource ModifiedBrush}" />
+          <Setter Property="FontWeight" Value="SemiBold" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding DataState}" Value="{x:Static vm:DataState.Same}">
+          <Setter Property="Foreground" Value="{StaticResource AddedBrush}" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding DataState}" Value="{x:Static vm:DataState.Failed}">
+          <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+        </DataTrigger>
+        <DataTrigger Binding="{Binding DataState}" Value="{x:Static vm:DataState.Comparing}">
+          <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+        </DataTrigger>
+      </Style.Triggers>
+    </Style>
+
+    <!-- A count with a coloured dot, for the data comparison summary. -->
+    <Style x:Key="CountLabel" TargetType="TextBlock">
+      <Setter Property="Margin" Value="0,0,16,0" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+  </UserControl.Resources>
+
+  <Grid Margin="16">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+
+    <!-- Connections and options -->
+    <Border Grid.Row="0" Style="{StaticResource Card}">
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Left" VerticalAlignment="Center" Margin="0,0,12,0" />
+        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding Connections}" SelectedItem="{Binding LeftConnection}"
+                  ItemTemplate="{StaticResource ConnectionItem}" AutomationProperties.Name="Left connection"
+                  ToolTip="The reference database, e.g. production. Saved connections are managed with the pencil button." />
+        <Button Grid.Row="0" Grid.Column="2" Style="{StaticResource IconButton}" Content="&#xE70F;" ToolTip="Edit connections"
+                Command="{Binding ManageConnectionsCommand}" CommandParameter="left" />
+
+        <TextBlock Grid.Row="1" Grid.Column="0" Text="Right" VerticalAlignment="Center" Margin="0,8,12,0" />
+        <ComboBox Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" ItemsSource="{Binding Connections}" SelectedItem="{Binding RightConnection}"
+                  ItemTemplate="{StaticResource ConnectionItem}" AutomationProperties.Name="Right connection"
+                  ToolTip="The database checked against the left one, e.g. test." />
+        <Button Grid.Row="1" Grid.Column="2" Margin="4,8,0,0" Style="{StaticResource IconButton}" Content="&#xE70F;" ToolTip="Edit connections"
+                Command="{Binding ManageConnectionsCommand}" CommandParameter="right" />
+
+        <StackPanel Grid.Row="0" Grid.RowSpan="2" Grid.Column="3" Margin="12,0,0,0" VerticalAlignment="Center">
+          <Button Content="Compare" Command="{Binding CompareCommand}" IsDefault="True" MinWidth="110"
+                  Style="{DynamicResource AccentButtonStyle}" ToolTip="Read both schemas and compare them (read-only)" />
+          <Button Content="Cancel" Command="{Binding CompareCancelCommand}" MinWidth="110" Margin="0,6,0,0"
+                  Visibility="{Binding CompareCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+          <Button Content="Swap sides" Command="{Binding SwapCommand}" MinWidth="110" Margin="0,6,0,0"
+                  Visibility="{Binding CompareCommand.IsRunning, Converter={StaticResource CollapsedWhen}}" />
+        </StackPanel>
+
+        <DockPanel Grid.Row="2" Grid.ColumnSpan="4" Margin="0,10,0,0">
+          <ProgressBar DockPanel.Dock="Left" Width="120" Height="4" IsIndeterminate="True" Margin="0,0,10,0"
+                       Visibility="{Binding CompareCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+          <TextBlock DockPanel.Dock="Right" Text="{Binding ComparedDatabases}" Style="{StaticResource Muted}" FontSize="12" Margin="12,0,0,0"
+                     VerticalAlignment="Center" FontFamily="{StaticResource MonoFont}" />
+          <TextBlock Text="{Binding StatusText}" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" ToolTip="{Binding StatusText}" />
+        </DockPanel>
+
+        <TextBlock Grid.Row="3" Grid.ColumnSpan="4" Margin="0,6,0,0" FontSize="12" Style="{StaticResource Muted}" TextWrapping="Wrap"
+                   Visibility="{Binding Connections.Count, Converter={StaticResource CollapsedWhen}}">
+          <Run Text="No saved connections yet." />
+          <Hyperlink Command="{Binding ManageConnectionsCommand}">Add one</Hyperlink>
+          <Run Text="for each database (server, database and login), or paste a connection string." />
+        </TextBlock>
+
+        <!-- What counts as a difference; changing an option re-compares at once, without reading the databases again. -->
+        <WrapPanel Grid.Row="4" Grid.ColumnSpan="4" Margin="0,8,0,0">
+          <TextBlock Text="Ignore:" VerticalAlignment="Center" Margin="0,0,10,0" Style="{StaticResource Muted}" />
+          <CheckBox Content="Generated constraint names" IsChecked="{Binding IgnoreSystemNames}" Margin="0,0,16,0"
+                    ToolTip="Names SQL Server makes up for unnamed constraints (DF__Orders__Statu__3B75D760) differ in every database" />
+          <CheckBox Content="Whitespace in code" IsChecked="{Binding IgnoreWhitespace}" Margin="0,0,16,0"
+                    ToolTip="Views, procedures, functions and triggers that differ only in indentation, blank lines or line endings count as identical" />
+          <CheckBox Content="Column order" IsChecked="{Binding IgnoreColumnOrder}" Margin="0,0,16,0"
+                    ToolTip="Tables with the same columns in another order count as identical" />
+          <CheckBox Content="Collations" IsChecked="{Binding IgnoreCollation}"
+                    ToolTip="Leave column collations out, e.g. between servers with different default collations" />
+        </WrapPanel>
+      </Grid>
+    </Border>
+
+    <!-- Filters -->
+    <DockPanel Grid.Row="1" Margin="0,12,0,0" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
+      <Button DockPanel.Dock="Right" Style="{StaticResource IconButton}" Content="&#xE712;" ToolTip="More options" Click="OnMoreClick">
+        <Button.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Compare data of the listed tables" Command="{Binding CompareAllDataCommand}"
+                      ToolTip="Compares the rows of every listed table that exists on both sides, one table at a time" />
+            <Separator />
+            <MenuItem Header="Export listed objects to CSV…" Command="{Binding ExportCommand}" />
+          </ContextMenu>
+        </Button.ContextMenu>
+      </Button>
+      <TextBox DockPanel.Dock="Right" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=150}" Width="260"
+               AutomationProperties.Name="Filter objects" ToolTip="Filter by schema or name" />
+      <ComboBox DockPanel.Dock="Right" ItemsSource="{x:Static vm:DbDiffViewModel.TypeFilters}" SelectedItem="{Binding TypeFilter}"
+                DisplayMemberPath="Label" Width="150" Margin="0,0,8,0" AutomationProperties.Name="Object type" />
+      <WrapPanel VerticalAlignment="Center">
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowDifferent}" AutomationProperties.Name="Different"
+                      ToolTip="Objects on both sides that differ">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource ModifiedBrush}" />
+            <TextBlock Text="Different" />
+            <TextBlock Text="{Binding Comparison.Different, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowOnlyInLeft}" AutomationProperties.Name="Only in left"
+                      ToolTip="Objects missing from the right database">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource RemovedBrush}" />
+            <TextBlock Text="Only in left" />
+            <TextBlock Text="{Binding Comparison.OnlyInLeft, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowOnlyInRight}" AutomationProperties.Name="Only in right"
+                      ToolTip="Objects missing from the left database">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource AddedBrush}" />
+            <TextBlock Text="Only in right" />
+            <TextBlock Text="{Binding Comparison.OnlyInRight, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+        <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowIdentical}" AutomationProperties.Name="Identical"
+                      ToolTip="Objects that are the same on both sides (show them to compare their data)">
+          <StackPanel Orientation="Horizontal">
+            <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource UnchangedBrush}" />
+            <TextBlock Text="Identical" />
+            <TextBlock Text="{Binding Comparison.Identical, StringFormat=' {0:N0}'}" Style="{StaticResource Muted}" />
+          </StackPanel>
+        </ToggleButton>
+      </WrapPanel>
+    </DockPanel>
+
+    <!-- Database-level differences, and the progress of comparing many tables' data. -->
+    <StackPanel Grid.Row="2" Margin="2,8,0,0">
+      <TextBlock TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}" AutomationProperties.Name="Database differences"
+                 Visibility="{Binding DatabaseDifferences, Converter={StaticResource VisibleWhen}}">
+        <Run Text="&#xE946;" FontFamily="{StaticResource IconFont}" BaselineAlignment="Center" />
+        <Run Text="{Binding DatabaseDifferences, Mode=OneWay}" />
+      </TextBlock>
+      <DockPanel Margin="0,4,0,0" Visibility="{Binding BackgroundStatus, Converter={StaticResource VisibleWhen}}">
+        <Button DockPanel.Dock="Right" Content="Stop" Command="{Binding CompareAllDataCancelCommand}" Padding="10,2"
+                Visibility="{Binding CompareAllDataCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+        <ProgressBar DockPanel.Dock="Left" Width="80" Height="4" IsIndeterminate="True" Margin="0,0,10,0"
+                     Visibility="{Binding CompareAllDataCommand.IsRunning, Converter={StaticResource VisibleWhen}}" />
+        <TextBlock Text="{Binding BackgroundStatus}" FontSize="12" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                   TextTrimming="CharacterEllipsis" />
+      </DockPanel>
+    </StackPanel>
+
+    <!-- Objects and the selected one's detail -->
+    <Grid Grid.Row="3" Margin="0,8,0,0" Visibility="{Binding HasResult, Converter={StaticResource VisibleWhen}}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="5*" MinWidth="520" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="6*" MinWidth="360" />
+      </Grid.ColumnDefinitions>
+
+      <ListView Grid.Column="0" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
+                ItemContainerStyle="{StaticResource ObjectRowItem}" ctl:Behaviors.FillColumn="3"
+                VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                AutomationProperties.Name="Database objects">
+        <ListView.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Compare rows" Command="{Binding CompareDataCommand}" />
+            <Separator />
+            <MenuItem Header="Copy name" Command="{Binding CopyNameCommand}" CommandParameter="{Binding SelectedRow}" />
+            <MenuItem Header="Copy left script" Command="{Binding CopyScriptCommand}" CommandParameter="left" />
+            <MenuItem Header="Copy right script" Command="{Binding CopyScriptCommand}" CommandParameter="right" />
+          </ContextMenu>
+        </ListView.ContextMenu>
+        <ListView.View>
+          <GridView>
+            <GridViewColumn Width="30">
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Style="{StaticResource Icon}" Text="&#xE7B3;" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"
+                             AutomationProperties.Name="Shown in detail"
+                             Visibility="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListViewItem}, Converter={StaticResource VisibleWhen}}" />
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="112">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding StatusHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.Status}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <Border Style="{StaticResource Badge}" Background="{Binding Status, Converter={StaticResource BadgeBrush}}">
+                    <TextBlock Style="{StaticResource BadgeText}" Text="{Binding StatusText}" />
+                  </Border>
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="84" DisplayMemberBinding="{Binding Type}">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding TypeHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.Type}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
+            </GridViewColumn>
+            <GridViewColumn Width="320">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding NameHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.Name}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left" />
+              </GridViewColumn.Header>
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <StackPanel ToolTip="{Binding FullName}">
+                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Summary}" FontSize="11" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="84">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding LeftRowsHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.LeftRows}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Right" />
+              </GridViewColumn.Header>
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding LeftRows, StringFormat={}{0:N0}}" Style="{StaticResource RowCount}" />
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="84">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding RightRowsHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.RightRows}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Right" />
+              </GridViewColumn.Header>
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding RightRows, StringFormat={}{0:N0}}" Style="{StaticResource RowCount}" />
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+            <GridViewColumn Width="130">
+              <GridViewColumn.Header>
+                <GridViewColumnHeader Content="{Binding DataHeader}" CommandParameter="{x:Static vm:DbDiffSortKey.Data}" Command="{Binding SortByCommand}" HorizontalContentAlignment="Left"
+                                      ToolTip="Row comparison: −only in left (missing on the right), +only in right, ~changed" />
+              </GridViewColumn.Header>
+              <GridViewColumn.CellTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding DataText}" ToolTip="{Binding DataTooltip}" Style="{StaticResource DataCell}" />
+                </DataTemplate>
+              </GridViewColumn.CellTemplate>
+            </GridViewColumn>
+          </GridView>
+        </ListView.View>
+      </ListView>
+
+      <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" />
+
+      <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0">
+        <Grid>
+          <TextBlock Text="Select an object to see what differs." Style="{StaticResource Muted}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"
+                     Visibility="{Binding SelectedRow, Converter={StaticResource CollapsedWhen}}" />
+
+          <DockPanel Visibility="{Binding SelectedRow, Converter={StaticResource VisibleWhen}}">
+            <!-- Which object this is, in large type. -->
+            <StackPanel DockPanel.Dock="Top" Margin="12,10,12,2">
+              <WrapPanel>
+                <Border Style="{StaticResource Badge}" Background="{Binding SelectedRow.Status, Converter={StaticResource BadgeBrush}}" Margin="0,0,8,0">
+                  <TextBlock Style="{StaticResource BadgeText}" Text="{Binding SelectedRow.StatusText}" />
+                </Border>
+                <TextBlock Text="{Binding SelectedRow.Name}" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+                <TextBlock Text="{Binding SelectedRow.Type}" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="10,0,0,0" />
+              </WrapPanel>
+              <TextBlock Text="{Binding SelectedRow.FullName}" Style="{StaticResource Muted}" FontSize="12" Margin="0,2,0,0" />
+              <TextBlock Text="{Binding SelectedRow.RowCountsText}" Style="{StaticResource Muted}" FontSize="12"
+                         Visibility="{Binding SelectedRow.RowCountsText, Converter={StaticResource VisibleWhen}}" />
+            </StackPanel>
+
+            <TabControl Margin="8,4,8,8" AutomationProperties.Name="Object detail">
+              <!-- What differs, in words. -->
+              <TabItem Header="Differences">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                  <StackPanel Margin="8">
+                    <TextBlock Text="{Binding SelectedRow.Detail}" TextWrapping="Wrap" Margin="0,0,0,8"
+                               Visibility="{Binding SelectedRow.Detail, Converter={StaticResource VisibleWhen}}" />
+                    <ItemsControl ItemsSource="{Binding SelectedRow.Differences}" Focusable="False">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <DockPanel Margin="0,0,0,6">
+                            <TextBlock DockPanel.Dock="Left" Text="•" Margin="0,0,8,0" Foreground="{StaticResource ModifiedBrush}" FontWeight="Bold" />
+                            <TextBox Text="{Binding Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0" Background="Transparent"
+                                     Padding="0" FontFamily="{StaticResource MonoFont}" FontSize="12.5" />
+                          </DockPanel>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </StackPanel>
+                </ScrollViewer>
+              </TabItem>
+
+              <!-- Both CREATE scripts, side by side, as the comparison saw them. -->
+              <TabItem Header="Script">
+                <DockPanel DataContext="{Binding ScriptDiff}" PreviewMouseWheel="OnScriptMouseWheel">
+                  <DockPanel.InputBindings>
+                    <KeyBinding Key="F8" Command="{Binding NextChangeCommand}" />
+                    <KeyBinding Key="F8" Modifiers="Shift" Command="{Binding PreviousChangeCommand}" />
+                    <KeyBinding Key="OemPlus" Modifiers="Control" Command="{Binding Zoom.ZoomInCommand}" />
+                    <KeyBinding Key="Add" Modifiers="Control" Command="{Binding Zoom.ZoomInCommand}" />
+                    <KeyBinding Key="OemMinus" Modifiers="Control" Command="{Binding Zoom.ZoomOutCommand}" />
+                    <KeyBinding Key="Subtract" Modifiers="Control" Command="{Binding Zoom.ZoomOutCommand}" />
+                    <KeyBinding Key="D0" Modifiers="Control" Command="{Binding Zoom.ResetZoomCommand}" />
+                    <KeyBinding Key="NumPad0" Modifiers="Control" Command="{Binding Zoom.ResetZoomCommand}" />
+                  </DockPanel.InputBindings>
+
+                  <DockPanel DockPanel.Dock="Top" Margin="8,6,4,6">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                      <Button Content="{Binding Zoom.Percent}" Command="{Binding Zoom.ResetZoomCommand}" Padding="8,2" FontSize="12"
+                              Visibility="{Binding Zoom.IsZoomed, Converter={StaticResource VisibleWhen}}"
+                              ToolTip="Text zoom (Ctrl+mouse wheel, Ctrl+plus, Ctrl+minus). Click or press Ctrl+0 to reset." />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE70E;" ToolTip="Previous change (Shift+F8)" Command="{Binding PreviousChangeCommand}" />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE70D;" ToolTip="Next change (F8)" Command="{Binding NextChangeCommand}" />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" ToolTip="Copy left script"
+                              Command="{Binding DataContext.CopyScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="left" />
+                      <Button Style="{StaticResource IconButton}" Content="&#xE8C8;" ToolTip="Copy right script"
+                              Command="{Binding DataContext.CopyScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="right" />
+                    </StackPanel>
+                    <!-- Git-style change counter. -->
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                      <StackPanel Orientation="Horizontal" Visibility="{Binding Detail.Stats.HasChanges, Converter={StaticResource VisibleWhen}}">
+                        <TextBlock Text="{Binding Detail.Stats.Additions, StringFormat='+{0:N0}'}" Foreground="{StaticResource AddedBrush}"
+                                   FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding Detail.Stats.Deletions, StringFormat='-{0:N0}'}" Foreground="{StaticResource RemovedBrush}"
+                                   FontFamily="{StaticResource MonoFont}" FontWeight="SemiBold" Margin="8,0,12,0" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding Detail.Summary}" Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                  </DockPanel>
+
+                  <Grid>
+                    <ListBox ItemsSource="{Binding Detail.Lines}" SelectedItem="{Binding SelectedLine}"
+                             ItemContainerStyle="{StaticResource DiffLineItem}" ItemTemplate="{StaticResource SideBySideLineTemplate}"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                             VirtualizingPanel.ScrollUnit="Pixel"
+                             ctl:Behaviors.ScrollSelectionIntoView="True"
+                             BorderThickness="0" Background="Transparent"
+                             AutomationProperties.Name="Script differences" />
+                    <ProgressBar IsIndeterminate="True" Height="4" VerticalAlignment="Top"
+                                 Visibility="{Binding IsLoading, Converter={StaticResource VisibleWhen}}" />
+                  </Grid>
+                </DockPanel>
+              </TabItem>
+
+              <!-- Rows of a table: missing, extra and changed. -->
+              <TabItem Header="Data">
+                <Grid DataContext="{Binding SelectedRow}">
+                  <TextBlock Text="Rows are compared for tables that exist in both databases." Style="{StaticResource Muted}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap" Margin="16"
+                             Visibility="{Binding CanCompareData, Converter={StaticResource CollapsedWhen}}" />
+
+                  <DockPanel Visibility="{Binding CanCompareData, Converter={StaticResource VisibleWhen}}">
+                    <!-- How to compare -->
+                    <Grid DockPanel.Dock="Top" Margin="8,8,8,0">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                      </Grid.RowDefinitions>
+
+                      <TextBlock Grid.Row="0" Text="Key columns" VerticalAlignment="Center" Margin="0,0,10,0" />
+                      <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding KeyColumnsText, UpdateSourceTrigger=PropertyChanged}" FontFamily="{StaticResource MonoFont}"
+                               AutomationProperties.Name="Key columns"
+                               ToolTip="Columns that identify a row, separated by commas. Leave empty to use the primary key, or else a unique constraint or index." />
+                      <TextBlock Grid.Row="1" Text="Ignore columns" VerticalAlignment="Center" Margin="0,6,10,0" />
+                      <TextBox Grid.Row="1" Grid.Column="1" Margin="0,6,0,0" Text="{Binding IgnoredColumnsText, UpdateSourceTrigger=PropertyChanged}"
+                               FontFamily="{StaticResource MonoFont}" AutomationProperties.Name="Ignored columns"
+                               ToolTip="Columns to leave out, separated by commas, e.g. audit timestamps. rowversion columns are always left out." />
+                      <TextBlock Grid.Row="2" Text="Where" VerticalAlignment="Center" Margin="0,6,10,0" />
+                      <TextBox Grid.Row="2" Grid.Column="1" Margin="0,6,0,0" Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged}"
+                               FontFamily="{StaticResource MonoFont}" AutomationProperties.Name="Row filter"
+                               ToolTip="Optional condition applied on both sides, e.g. CreatedAt &gt;= '2026-01-01' or TenantId = 7" />
+
+                      <StackPanel Grid.Row="0" Grid.RowSpan="3" Grid.Column="2" Margin="10,0,0,0" VerticalAlignment="Center">
+                        <Button Content="Compare rows" MinWidth="120" Style="{DynamicResource AccentButtonStyle}"
+                                Command="{Binding DataContext.CompareDataCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                ToolTip="Read both tables (read-only) and match their rows by key" />
+                        <Button Content="Cancel" MinWidth="120" Margin="0,6,0,0"
+                                Command="{Binding DataContext.CompareDataCancelCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                Visibility="{Binding IsComparingData, Converter={StaticResource VisibleWhen}}" />
+                      </StackPanel>
+                    </Grid>
+
+                    <!-- Progress, error, result summary -->
+                    <StackPanel DockPanel.Dock="Top" Margin="8,10,8,6">
+                      <StackPanel Visibility="{Binding IsComparingData, Converter={StaticResource VisibleWhen}}">
+                        <ProgressBar IsIndeterminate="True" Height="4" />
+                        <TextBlock Text="{Binding DataProgress}" Style="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0" />
+                      </StackPanel>
+                      <TextBlock Text="{Binding DataError}" Foreground="{StaticResource ErrorBrush}" TextWrapping="Wrap"
+                                 Visibility="{Binding DataError, Converter={StaticResource VisibleWhen}}" />
+
+                      <StackPanel Visibility="{Binding HasData, Converter={StaticResource VisibleWhen}}">
+                        <WrapPanel>
+                          <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource RemovedBrush}" />
+                          <TextBlock Style="{StaticResource CountLabel}" ToolTip="Rows missing from the right table">
+                            <Run Text="Only in left" /> <Run Text="{Binding Data.OnlyInLeft, StringFormat={}{0:N0}, Mode=OneWay}" FontWeight="SemiBold" />
+                          </TextBlock>
+                          <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource AddedBrush}" />
+                          <TextBlock Style="{StaticResource CountLabel}" ToolTip="Rows missing from the left table">
+                            <Run Text="Only in right" /> <Run Text="{Binding Data.OnlyInRight, StringFormat={}{0:N0}, Mode=OneWay}" FontWeight="SemiBold" />
+                          </TextBlock>
+                          <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource ModifiedBrush}" />
+                          <TextBlock Style="{StaticResource CountLabel}" ToolTip="Rows with the same key and different values">
+                            <Run Text="Changed" /> <Run Text="{Binding Data.Different, StringFormat={}{0:N0}, Mode=OneWay}" FontWeight="SemiBold" />
+                          </TextBlock>
+                          <Ellipse Width="8" Height="8" Margin="0,0,6,0" Fill="{StaticResource UnchangedBrush}" />
+                          <TextBlock Style="{StaticResource CountLabel}">
+                            <Run Text="Identical" /> <Run Text="{Binding Data.Identical, StringFormat={}{0:N0}, Mode=OneWay}" FontWeight="SemiBold" />
+                          </TextBlock>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding DataSummary}" Style="{StaticResource Muted}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                        <ItemsControl ItemsSource="{Binding DataColumns}" Margin="0,6,0,0" Focusable="False"
+                                      Visibility="{Binding DataColumns.Count, Converter={StaticResource VisibleWhen}}"
+                                      ToolTip="Changed rows per column">
+                          <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                          </ItemsControl.ItemsPanel>
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Border Style="{StaticResource Badge}" BorderThickness="1" BorderBrush="{StaticResource ModifiedBrush}" Margin="0,0,6,4">
+                                <TextBlock Text="{Binding}" FontSize="11" />
+                              </Border>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <ItemsControl ItemsSource="{Binding Data.Notes}" Margin="0,4,0,0" Focusable="False">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <TextBlock TextWrapping="Wrap" FontSize="12" Style="{StaticResource Muted}" Margin="0,2,0,0">
+                                <Run Text="&#xE946;" FontFamily="{StaticResource IconFont}" BaselineAlignment="Center" />
+                                <Run Text="{Binding Mode=OneWay}" />
+                              </TextBlock>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+
+                        <WrapPanel Margin="0,8,0,0" Visibility="{Binding Data.HasDifferences, Converter={StaticResource VisibleWhen}}">
+                          <Button Margin="0,0,8,4" CommandParameter="right"
+                                  Command="{Binding DataContext.CopySyncScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  ToolTip="Copies INSERT, UPDATE and DELETE statements for the rows below, to review and run on the right database">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Style="{StaticResource Icon}" Text="&#xE8C8;" Margin="0,0,6,0" />
+                              <TextBlock Text="Copy script: make right match left" />
+                            </StackPanel>
+                          </Button>
+                          <Button Margin="0,0,8,4" CommandParameter="left"
+                                  Command="{Binding DataContext.CopySyncScriptCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                  ToolTip="The same the other way round, to run on the left database">
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Style="{StaticResource Icon}" Text="&#xE8C8;" Margin="0,0,6,0" />
+                              <TextBlock Text="make left match right" />
+                            </StackPanel>
+                          </Button>
+                        </WrapPanel>
+                        <TextBlock FontSize="12" Style="{StaticResource Muted}" TextWrapping="Wrap"
+                                   Visibility="{Binding Data.SamplesAreComplete, Converter={StaticResource CollapsedWhen}}">
+                          <Run Text="Showing" /> <Run Text="{Binding Data.Samples.Count, StringFormat={}{0:N0}, Mode=OneWay}" />
+                          <Run Text="example rows of" /> <Run Text="{Binding Data.DifferenceCount, StringFormat={}{0:N0}, Mode=OneWay}" />
+                          <Run Text="differences. Raise the limit in Settings, or narrow the rows with a Where condition." />
+                        </TextBlock>
+                      </StackPanel>
+                    </StackPanel>
+
+                    <!-- Example rows -->
+                    <ListBox ItemsSource="{Binding DataSamples}" Margin="4,0,4,4" BorderThickness="0" Background="Transparent"
+                             ItemContainerStyle="{StaticResource DenseItem}"
+                             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             AutomationProperties.Name="Differing rows">
+                      <ListBox.ItemTemplate>
+                        <DataTemplate>
+                          <Grid Margin="4,3">
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="100" />
+                              <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0" Style="{StaticResource Badge}" VerticalAlignment="Top" Margin="0,1,0,0"
+                                    Background="{Binding Status, Converter={StaticResource BadgeBrush}}">
+                              <TextBlock Style="{StaticResource BadgeText}" Text="{Binding Label}" FontSize="10" />
+                            </Border>
+                            <StackPanel Grid.Column="1">
+                              <TextBlock Text="{Binding Key}" Style="{StaticResource MonoText}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" ToolTip="{Binding Key}" />
+                              <TextBlock Text="{Binding Details}" Style="{StaticResource MonoText}" FontSize="12" TextWrapping="Wrap"
+                                         Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                          </Grid>
+                        </DataTemplate>
+                      </ListBox.ItemTemplate>
+                    </ListBox>
+                  </DockPanel>
+                </Grid>
+              </TabItem>
+            </TabControl>
+          </DockPanel>
+        </Grid>
+      </Border>
+    </Grid>
+  </Grid>
+</UserControl>

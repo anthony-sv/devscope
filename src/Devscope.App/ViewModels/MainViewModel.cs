@@ -18,10 +18,10 @@ public sealed partial class MainViewModel : ObservableObject
 {
     private readonly IDialogService _dialogs;
 
-    public MainViewModel(EarDiffViewModel earDiff, LogsViewModel logs, IDialogService dialogs)
+    public MainViewModel(EarDiffViewModel earDiff, DbDiffViewModel dbDiff, LogsViewModel logs, IDialogService dialogs)
     {
         _dialogs = dialogs;
-        Pages = [earDiff, logs];
+        Pages = [earDiff, dbDiff, logs];
         _selectedPage = earDiff;
     }
 

@@ -2,9 +2,11 @@
   <Folder Name="/src/">
     <Project Path="src/Devscope.App/Devscope.App.csproj" />
     <Project Path="src/Devscope.Core/Devscope.Core.csproj" />
+    <Project Path="src/Devscope.SqlServer/Devscope.SqlServer.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Devscope.Core.Tests/Devscope.Core.Tests.csproj" />
+    <Project Path="tests/Devscope.SqlServer.Tests/Devscope.SqlServer.Tests.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path="Directory.Build.props" />

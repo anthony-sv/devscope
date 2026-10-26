@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Devscope.App.Services;
 
-/// <summary>Per-user preferences: last paths and workspace, plus everything edited in the Settings window.</summary>
+/// <summary>Per-user preferences: last paths, workspace and connections, plus everything edited in the Settings window.</summary>
 public sealed class UserSettings
 {
     public string LeftEarPath { get; set; } = string.Empty;
@@ -42,6 +42,24 @@ public sealed class UserSettings
 
     /// <summary>Zoom of the diff text (1 = 100%), changed with Ctrl+mouse wheel.</summary>
     public double DiffZoom { get; set; } = 1;
+
+    public Guid? LeftConnectionId { get; set; }
+
+    public Guid? RightConnectionId { get; set; }
+
+    public bool DbIgnoreSystemNames { get; set; } = true;
+
+    public bool DbIgnoreWhitespace { get; set; } = true;
+
+    public bool DbIgnoreColumnOrder { get; set; }
+
+    public bool DbIgnoreCollation { get; set; }
+
+    /// <summary>Differing rows kept as examples per kind (only in left, only in right, changed) and table.</summary>
+    public int DbSampleRows { get; set; } = 1000;
+
+    /// <summary>Rows a data comparison may hold in memory when a table has no key both servers sort the same way.</summary>
+    public int DbMaxInMemoryRows { get; set; } = 2_000_000;
 }
 
 public interface IUserSettingsStore

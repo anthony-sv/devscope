@@ -3,9 +3,11 @@ using System.Windows.Threading;
 using Devscope.App.Services;
 using Devscope.App.ViewModels;
 using Devscope.App.Views;
+using Devscope.Core.Database;
 using Devscope.Core.Ear;
 using Devscope.Core.Logs;
 using Devscope.Core.Workspaces;
+using Devscope.SqlServer;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -69,14 +71,20 @@ public partial class App : Application
         services.AddSingleton<ILogSessionFactory, LogSessionFactory>();
         services.AddSingleton<IWorkspaceStore>(sp =>
             new JsonWorkspaceStore(JsonWorkspaceStore.DefaultFilePath, sp.GetRequiredService<ILogger<JsonWorkspaceStore>>()));
+        services.AddSingleton<IDatabaseProvider, SqlServerProvider>();
+        services.AddSingleton<IConnectionStore>(sp =>
+            new JsonConnectionStore(JsonConnectionStore.DefaultFilePath, sp.GetRequiredService<ILogger<JsonConnectionStore>>()));
 
         // App services
         services.AddSingleton<IDialogService, DialogService>();
         services.AddSingleton<IUserSettingsStore, UserSettingsStore>();
         services.AddSingleton<IShellService, ShellService>();
+        services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+        services.AddSingleton<ConnectionPasswords>();
 
         // View models and the window
         services.AddSingleton<EarDiffViewModel>();
+        services.AddSingleton<DbDiffViewModel>();
         services.AddSingleton<LogsViewModel>();
         services.AddSingleton<MainViewModel>();
         services.AddTransient<SettingsViewModel>();

@@ -1,6 +1,7 @@
 using System.Windows;
 using Devscope.App.ViewModels;
 using Devscope.App.Views;
+using Devscope.Core.Database;
 using Devscope.Core.Workspaces;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Win32;
@@ -25,6 +26,12 @@ public interface IDialogService
 
     /// <summary>Opens the Settings window; saved changes are applied through <see cref="IUserSettingsStore.Changed"/>.</summary>
     void ShowSettings();
+
+    /// <summary>
+    /// Opens the database connection manager on <paramref name="selectedId"/>, with an optional <paramref name="message"/>
+    /// (e.g. a password is needed). Returns the edited connections, or null when cancelled.
+    /// </summary>
+    IReadOnlyList<DbConnectionProfile>? EditConnections(IReadOnlyList<DbConnectionProfile> connections, Guid? selectedId, string? message);
 
     /// <summary>Shows the diff window with the EAR diff's open tabs, or brings it to the front when already open.</summary>
     void ShowDiffWindow(EarDiffViewModel viewModel);
@@ -67,6 +74,14 @@ public sealed class DialogService(IServiceProvider services) : IDialogService
     {
         var window = new SettingsWindow { DataContext = services.GetRequiredService<SettingsViewModel>(), Owner = Owner };
         window.ShowDialog();
+    }
+
+    public IReadOnlyList<DbConnectionProfile>? EditConnections(IReadOnlyList<DbConnectionProfile> connections, Guid? selectedId, string? message)
+    {
+        var viewModel = new ConnectionManagerViewModel(
+            connections, selectedId, message, services.GetRequiredService<IDatabaseProvider>(), services.GetRequiredService<ConnectionPasswords>());
+        var window = new ConnectionManagerWindow { DataContext = viewModel, Owner = Owner };
+        return window.ShowDialog() == true ? viewModel.Apply() : null;
     }
 
     public void ShowDiffWindow(EarDiffViewModel viewModel)

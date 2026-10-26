@@ -35,6 +35,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Devscope.Core\Devscope.Core.csproj" />
+    <ProjectReference Include="..\Devscope.SqlServer\Devscope.SqlServer.csproj" />
   </ItemGroup>
 
   <!-- Optional decompiler (tools\Get-Vineflower.ps1). Shipped beside the exe, not inside it, so Java can load it. -->
