@@ -27,9 +27,10 @@ public sealed record LogFileSource(string Environment, string FilePath, int Colo
 /// </summary>
 public sealed class LogEntry
 {
-    internal LogEntry(long id, LogFileSource source, string text, int lineCount, DateTimeOffset? timestamp, DateTimeOffset sortTime, LogSeverity severity)
+    internal LogEntry(long id, LogFileSource source, string text, int lineCount, DateTimeOffset? timestamp, DateTimeOffset sortTime, LogSeverity severity, int revision = 0)
     {
         Id = id;
+        Revision = revision;
         Source = source;
         Text = text;
         LineCount = lineCount;
@@ -43,6 +44,15 @@ public sealed class LogEntry
 
     /// <summary>Monotonic id in arrival order; used as a stable tiebreaker when sorting.</summary>
     public long Id { get; }
+
+    /// <summary>
+    /// 0 for a new event. Higher when lines (typically a stack trace) were written after the event was first
+    /// emitted: the entry then replaces the earlier one with the same <see cref="Id"/>, which has the same position in time.
+    /// </summary>
+    public int Revision { get; }
+
+    /// <summary>Whether this entry replaces an earlier entry with the same <see cref="Id"/>.</summary>
+    public bool IsRevision => Revision > 0;
 
     public LogFileSource Source { get; }
 

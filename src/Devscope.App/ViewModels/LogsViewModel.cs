@@ -30,6 +30,9 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
     private readonly List<LogEntry> _allEntries = [];
     private readonly List<LogBatch> _pausedBatches = [];
     private readonly Dictionary<LogSeverity, FilterChipViewModel<LogSeverity>> _severityChips;
+    private readonly HashSet<string> _uncheckedFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<LogEventViewModel> _openEvents = [];
+    private string _fileTreeSignature = string.Empty;
     private Func<LogEntry, bool> _predicate = static _ => true;
     private LogSession? _session;
     private CancellationTokenSource? _sessionCts;
@@ -64,7 +67,7 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
 
     public string Title => "Logs";
 
-    public string Glyph => "";
+    public string Glyph => "\uE7C3";
 
     public ObservableCollection<WorkspaceItemViewModel> Workspaces { get; } = [];
 
@@ -73,6 +76,9 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
     public ObservableCollection<FilterChipViewModel<string>> EnvironmentChips { get; } = [];
 
     public ObservableCollection<SourceStatus> SourceStatuses { get; } = [];
+
+    /// <summary>Files being read, by environment and folder. Unticked files are hidden from the list.</summary>
+    public ObservableCollection<LogFileNodeViewModel> FileTree { get; } = [];
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(EditWorkspaceCommand), nameof(DeleteWorkspaceCommand), nameof(OpenWorkspaceCommand))]
@@ -90,7 +96,7 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
     private ObservableCollection<LogEntry> _visibleEntries = [];
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(CopyEntryCommand), nameof(RevealEntryCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopyEntryCommand), nameof(RevealEntryCommand), nameof(OpenEntryCommand))]
     private LogEntry? _selectedEntry;
 
     [ObservableProperty]
@@ -108,6 +114,41 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
     [ObservableProperty]
     private string? _filterError;
 
+    // Column filters, in the header row of the list.
+
+    /// <summary>Time column, lower end: <c>10:30</c>, <c>2026-10-16 10:30</c>, <c>-15m</c>.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private string _timeFrom = string.Empty;
+
+    /// <summary>Time column, upper end (inclusive).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private string _timeTo = string.Empty;
+
+    /// <summary>Source column: text in the environment or the file path.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private string _sourceFilter = string.Empty;
+
+    /// <summary>Message column: text (or regex) in the first line of the event.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private string _messageFilter = string.Empty;
+
+    /// <summary>Only events with more than one line, such as errors with a stack trace.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private bool _multilineOnly;
+
+    /// <summary>Lowest severity to show, from the Level column; <see cref="LogSeverity.Unknown"/> shows all.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasColumnFilters))]
+    private LevelOption _minimumLevel = LevelOptions[0];
+
+    [ObservableProperty]
+    private string? _timeFilterError;
+
     [ObservableProperty]
     private bool _isFollowing = true;
 
@@ -124,6 +165,36 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
     private IReadOnlyList<HighlightSpec> _highlights = [];
 
     public bool IsSessionOpen => SessionTitle is not null;
+
+    /// <summary>Choices of the Level column filter.</summary>
+    public static IReadOnlyList<LevelOption> LevelOptions { get; } =
+    [
+        new("All levels", LogSeverity.Unknown),
+        new("≥ Debug", LogSeverity.Debug),
+        new("≥ Info", LogSeverity.Info),
+        new("≥ Warn", LogSeverity.Warning),
+        new("≥ Error", LogSeverity.Error),
+        new("Fatal", LogSeverity.Fatal),
+    ];
+
+    public bool HasColumnFilters =>
+        TimeFrom.Length > 0 || TimeTo.Length > 0 || SourceFilter.Length > 0 || MessageFilter.Length > 0
+        || MultilineOnly || MinimumLevel.Minimum != LogSeverity.Unknown;
+
+    /// <summary>Whether some files are unticked in the Files tree.</summary>
+    public bool HasHiddenFiles => _uncheckedFiles.Count > 0;
+
+    partial void OnTimeFromChanged(string value) => ScheduleRefilter();
+
+    partial void OnTimeToChanged(string value) => ScheduleRefilter();
+
+    partial void OnSourceFilterChanged(string value) => ScheduleRefilter();
+
+    partial void OnMessageFilterChanged(string value) => ScheduleRefilter();
+
+    partial void OnMultilineOnlyChanged(bool value) => ScheduleRefilter();
+
+    partial void OnMinimumLevelChanged(LevelOption value) => ScheduleRefilter();
 
     partial void OnSearchTextChanged(string value) => ScheduleRefilter();
 
@@ -245,6 +316,10 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
         VisibleEntries = [];
         EnvironmentChips.Clear();
         SourceStatuses.Clear();
+        FileTree.Clear();
+        _fileTreeSignature = string.Empty;
+        _uncheckedFiles.Clear();
+        OnPropertyChanged(nameof(HasHiddenFiles));
         SessionTitle = null;
         UpdateCounts();
     }
@@ -263,6 +338,117 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
 
     [RelayCommand(CanExecute = nameof(HasSelectedEntry))]
     private void RevealEntry() => _shell.RevealInExplorer(SelectedEntry!.Source.FilePath);
+
+    /// <summary>Opens the event, with its whole stack trace, in a window of its own.</summary>
+    [RelayCommand(CanExecute = nameof(HasSelectedEntry))]
+    private void OpenEntry()
+    {
+        if (SelectedEntry is not { } entry)
+        {
+            return;
+        }
+
+        var viewModel = new LogEventViewModel(entry, _shell);
+        _openEvents.Add(viewModel);
+        _dialogs.ShowLogEvent(viewModel, () => _openEvents.Remove(viewModel));
+    }
+
+    [RelayCommand]
+    private void ClearColumnFilters()
+    {
+        TimeFrom = string.Empty;
+        TimeTo = string.Empty;
+        SourceFilter = string.Empty;
+        MessageFilter = string.Empty;
+        MultilineOnly = false;
+        MinimumLevel = LevelOptions[0];
+    }
+
+    // ---- Files tree --------------------------------------------------------------------------
+
+    /// <summary>Shows only the file or folder (context menu of the Files tree).</summary>
+    [RelayCommand]
+    private void ShowOnlyFiles(LogFileNodeViewModel? node)
+    {
+        if (node is null)
+        {
+            return;
+        }
+
+        var keep = node.Files().Select(f => f.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in FileTree)
+        {
+            foreach (var file in root.Files())
+            {
+                file.SetCheckedSilently(keep.Contains(file.FullPath));
+            }
+
+            root.RefreshFromChildren();
+        }
+
+        OnFileChecksChanged();
+    }
+
+    [RelayCommand]
+    private void ShowAllFiles()
+    {
+        foreach (var root in FileTree)
+        {
+            root.SetCheckedSilently(true);
+        }
+
+        OnFileChecksChanged();
+    }
+
+    [RelayCommand]
+    private void RevealFile(LogFileNodeViewModel? node)
+    {
+        if (node is { FullPath.Length: > 0 })
+        {
+            _shell.RevealInExplorer(node.FullPath);
+        }
+    }
+
+    private void OnFileChecksChanged()
+    {
+        _uncheckedFiles.Clear();
+        foreach (var file in FileTree.SelectMany(n => n.Files()).Where(f => f.IsChecked != true))
+        {
+            _uncheckedFiles.Add(file.FullPath);
+        }
+
+        OnPropertyChanged(nameof(HasHiddenFiles));
+        ScheduleRefilter();
+    }
+
+    /// <summary>Rebuilds the tree after a discovery, keeping what was unticked; new files start ticked.</summary>
+    private void RebuildFileTree(IReadOnlyList<SourceStatus> statuses)
+    {
+        // Rediscovery runs every few seconds; leave the tree alone (scroll position, focus) unless files came or went.
+        var signature = string.Join('\n', statuses.SelectMany(st => st.Files.Select(f => st.Environment + '|' + f)));
+        if (signature == _fileTreeSignature && FileTree.Count > 0)
+        {
+            return;
+        }
+
+        _fileTreeSignature = signature;
+        var collapsed = FileTree.SelectMany(n => n.SelfAndDescendants()).Where(n => !n.IsFile && !n.IsExpanded)
+            .Select(n => (n.Environment, n.FullPath)).ToHashSet();
+
+        FileTree.Clear();
+        foreach (var node in LogFileTree.Build(statuses))
+        {
+            var item = new LogFileNodeViewModel(node, null, path => !_uncheckedFiles.Contains(path), OnFileChecksChanged);
+            foreach (var folder in item.SelfAndDescendants().Where(n => collapsed.Contains((n.Environment, n.FullPath))))
+            {
+                folder.IsExpanded = false;
+            }
+
+            FileTree.Add(item);
+        }
+
+        UpdateFileCounts();
+    }
 
     private bool HasSelectedEntry() => SelectedEntry is not null;
 
@@ -334,6 +520,8 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
             {
                 SourceStatuses.Add(status);
             }
+
+            RebuildFileTree(statuses);
         }
 
         if (batch.IsInitial)
@@ -346,10 +534,31 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
             return;
         }
 
+        // More lines of events already shown (a stack trace written after its header): swap them in place.
+        var entries = batch.Entries;
+        if (entries.Any(e => e.IsRevision))
+        {
+            var fresh = new List<LogEntry>(entries.Count);
+            foreach (var entry in entries)
+            {
+                if (!entry.IsRevision || !ReplaceRevised(entry))
+                {
+                    fresh.Add(entry);
+                }
+            }
+
+            entries = fresh;
+            if (entries.Count == 0)
+            {
+                UpdateCounts();
+                return;
+            }
+        }
+
         // Files are polled independently, so a batch can contain events older than what is already shown
         // (e.g. a slow share catching up). Keep the list in time order; that case is rare, so a full sort is fine.
-        var outOfOrder = _allEntries.Count > 0 && LogEntry.CompareByTime(batch.Entries[0], _allEntries[^1]) < 0;
-        _allEntries.AddRange(batch.Entries);
+        var outOfOrder = _allEntries.Count > 0 && LogEntry.CompareByTime(entries[0], _allEntries[^1]) < 0;
+        _allEntries.AddRange(entries);
         if (outOfOrder)
         {
             _allEntries.Sort(LogEntry.CompareByTime);
@@ -367,7 +576,7 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
         }
         else
         {
-            foreach (var entry in batch.Entries)
+            foreach (var entry in entries)
             {
                 if (_predicate(entry))
                 {
@@ -377,6 +586,79 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
         }
 
         UpdateCounts();
+    }
+
+    /// <summary>
+    /// Puts a revised event in place of the one with the same id. Returns false when that one is gone
+    /// (cleared or trimmed), in which case the revision is shown as a new event.
+    /// </summary>
+    private bool ReplaceRevised(LogEntry revised)
+    {
+        var index = _allEntries.BinarySearch(revised, Comparer<LogEntry>.Create(LogEntry.CompareByTime));
+        if (index < 0)
+        {
+            return false;
+        }
+
+        var previous = _allEntries[index];
+        _allEntries[index] = revised;
+
+        var visibleIndex = BinarySearch(VisibleEntries, revised);
+        var shows = _predicate(revised);
+        var wasSelected = ReferenceEquals(SelectedEntry, previous);
+        if (visibleIndex >= 0)
+        {
+            if (shows)
+            {
+                VisibleEntries[visibleIndex] = revised;
+            }
+            else
+            {
+                VisibleEntries.RemoveAt(visibleIndex);
+            }
+        }
+        else if (shows)
+        {
+            VisibleEntries.Insert(~visibleIndex, revised);
+        }
+
+        if (wasSelected)
+        {
+            SelectedEntry = shows ? revised : null;
+        }
+
+        foreach (var open in _openEvents.Where(e => e.Entry.Id == revised.Id && e.Entry.Source == revised.Source))
+        {
+            open.Entry = revised;
+        }
+
+        return true;
+    }
+
+    private static int BinarySearch(ObservableCollection<LogEntry> list, LogEntry entry)
+    {
+        var low = 0;
+        var high = list.Count - 1;
+        while (low <= high)
+        {
+            var mid = low + ((high - low) / 2);
+            var order = LogEntry.CompareByTime(list[mid], entry);
+            if (order == 0)
+            {
+                return mid;
+            }
+
+            if (order < 0)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return ~low;
     }
 
     private async Task StopSessionAsync()
@@ -452,11 +734,32 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
         }
     }
 
-    /// <summary>Compiles the current filter; returns false (and shows the error) for an invalid regex.</summary>
+    /// <summary>Compiles the current filter; returns false (and shows the error) for an invalid regex or time.</summary>
     private bool BuildFilter()
     {
-        var severities = SeverityChips.Where(c => c.IsEnabled).Select(c => c.Value).ToHashSet();
+        var minimum = MinimumLevel.Minimum;
+        var severities = SeverityChips
+            .Where(c => c.IsEnabled && (minimum == LogSeverity.Unknown || c.Value >= minimum))
+            .Select(c => c.Value)
+            .ToHashSet();
         var environments = EnvironmentChips.Where(c => c.IsEnabled).Select(c => c.Value).ToHashSet();
+
+        var now = DateTimeOffset.Now;
+        if (!LogTimeBound.TryParse(TimeFrom, isUpperBound: false, now, out var from)
+            || !LogTimeBound.TryParse(TimeTo, isUpperBound: true, now, out var to))
+        {
+            TimeFilterError = "Times look like 10:30, 10:30:15, 2026-10-16 10:30, 2026-10-16 or -15m (also -2h, -1d).";
+            return false;
+        }
+
+        TimeFilterError = null;
+
+        // Ticked files; null when nothing is unticked, so files discovered later show up too.
+        var allFiles = FileTree.SelectMany(n => n.Files()).ToList();
+        var files = _uncheckedFiles.Count == 0
+            ? null
+            : allFiles.Where(f => f.IsChecked == true).Select(f => f.FullPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         var filter = new LogFilter
         {
             Search = SearchText,
@@ -465,10 +768,16 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
             MatchCase = MatchCase,
             Severities = severities,
             Environments = environments,
+            Files = files,
+            SourceText = SourceFilter,
+            MessageText = MessageFilter,
+            From = from,
+            To = to,
+            MultilineOnly = MultilineOnly,
         };
 
-        // Turning every chip off means "show nothing", not "no filter".
-        if (severities.Count == 0 || (EnvironmentChips.Count > 0 && environments.Count == 0))
+        // Turning every chip (or every file) off means "show nothing", not "no filter".
+        if (severities.Count == 0 || (EnvironmentChips.Count > 0 && environments.Count == 0) || files is { Count: 0 })
         {
             _predicate = static _ => false;
             FilterError = null;
@@ -522,7 +831,43 @@ public sealed partial class LogsViewModel : ObservableObject, IPage, IDisposable
             chip.Count = byEnvironment[chip.Value];
         }
 
+        UpdateFileCounts();
+
         CountText = string.Create(CultureInfo.CurrentCulture, $"{VisibleEntries.Count:N0} of {_allEntries.Count:N0} events");
+    }
+
+    private void UpdateFileCounts()
+    {
+        if (FileTree.Count == 0)
+        {
+            return;
+        }
+
+        var byFile = new Dictionary<string, (int All, int Errors)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in _allEntries)
+        {
+            byFile.TryGetValue(entry.Source.FilePath, out var counts);
+            byFile[entry.Source.FilePath] = (counts.All + 1, counts.Errors + (entry.Severity >= LogSeverity.Error ? 1 : 0));
+        }
+
+        foreach (var root in FileTree)
+        {
+            Sum(root);
+        }
+
+        (int All, int Errors) Sum(LogFileNodeViewModel node)
+        {
+            var total = node.IsFile ? byFile.GetValueOrDefault(node.FullPath) : default;
+            foreach (var child in node.Children)
+            {
+                var c = Sum(child);
+                total = (total.All + c.All, total.Errors + c.Errors);
+            }
+
+            node.Count = total.All;
+            node.ErrorCount = total.Errors;
+            return total;
+        }
     }
 
     // ---- Persistence -------------------------------------------------------------------------

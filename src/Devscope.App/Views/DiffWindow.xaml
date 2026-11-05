@@ -8,6 +8,7 @@
         mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:EarDiffViewModel}"
         Title="{Binding ActiveDocument.Entry.Name, StringFormat='{}{0} – Devscope diff', FallbackValue='Devscope diff'}"
+        Icon="/Assets/devscope.ico"
         Width="1400" Height="900" MinWidth="640" MinHeight="400"
         WindowStartupLocation="CenterScreen" WindowState="Maximized">
   <Window.InputBindings>

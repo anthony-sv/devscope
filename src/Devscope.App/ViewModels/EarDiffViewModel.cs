@@ -82,7 +82,8 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
 
     public string Title => "EAR diff";
 
-    public string Glyph => "";
+    /// <summary>"Package" (a box): an EAR is an archive of archives.</summary>
+    public string Glyph => "\uE7B8";
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(CompareCommand))]
@@ -103,6 +104,25 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
 
     [ObservableProperty]
     private ObservableCollection<EarDiffRow> _rows = [];
+
+    /// <summary>Choice for the Type and Module filters that shows everything.</summary>
+    public const string AllOption = "All";
+
+    /// <summary>Type filter: a file extension such as ".class", or <see cref="AllOption"/>.</summary>
+    [ObservableProperty]
+    private string _typeFilter = AllOption;
+
+    /// <summary>Module filter: the top-level WAR/JAR a file sits in, or <see cref="AllOption"/>.</summary>
+    [ObservableProperty]
+    private string _moduleFilter = AllOption;
+
+    /// <summary>Extensions found in the comparison, most common first.</summary>
+    [ObservableProperty]
+    private IReadOnlyList<string> _typeOptions = [AllOption];
+
+    /// <summary>Top-level modules found in the comparison.</summary>
+    [ObservableProperty]
+    private IReadOnlyList<string> _moduleOptions = [AllOption];
 
     /// <summary>The row whose diff the preview pane shows.</summary>
     [ObservableProperty]
@@ -211,6 +231,67 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     partial void OnShowUnchangedChanged(bool value) => ApplyRowFilter();
 
     partial void OnShowArchivesChanged(bool value) => ApplyRowFilter();
+
+    private bool _updatingColumnOptions;
+
+    partial void OnTypeFilterChanged(string value)
+    {
+        if (!_updatingColumnOptions)
+        {
+            ApplyRowFilter();
+        }
+    }
+
+    partial void OnModuleFilterChanged(string value)
+    {
+        if (!_updatingColumnOptions)
+        {
+            ApplyRowFilter();
+        }
+    }
+
+    /// <summary>Lower-case extension of the last path segment (".class"), or "(none)".</summary>
+    internal static string TypeOf(string path)
+    {
+        var name = path[(path.LastIndexOf('/') + 1)..];
+        var dot = name.LastIndexOf('.');
+        return dot <= 0 ? "(none)" : name[dot..].ToLowerInvariant();
+    }
+
+    /// <summary>The top-level archive a nested path belongs to ("billing.war"), or "(EAR root)".</summary>
+    internal static string ModuleOf(string path)
+    {
+        var index = path.IndexOf(ArchivePath.NestedSeparator, StringComparison.Ordinal);
+        return index < 0 ? "(EAR root)" : path[..index];
+    }
+
+    /// <summary>Fills the Type and Module choices from a new comparison, keeping the current choice when it still exists.</summary>
+    private void UpdateColumnOptions(EarComparison comparison)
+    {
+        // RebuildRows runs right after, so neither new choices (a ComboBox may clear its selection when its items
+        // change) nor resetting a choice that no longer exists rebuild the list here.
+        _updatingColumnOptions = true;
+        try
+        {
+            var files = comparison.Entries.Where(e => !e.IsArchive).ToList();
+            TypeOptions = [AllOption, .. files.GroupBy(e => TypeOf(e.Path)).OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal).Select(g => g.Key)];
+            ModuleOptions = [AllOption, .. files.Select(e => ModuleOf(e.Path)).Distinct(StringComparer.Ordinal).Order(StringComparer.OrdinalIgnoreCase)];
+
+            if (TypeFilter is null || !TypeOptions.Contains(TypeFilter))
+            {
+                TypeFilter = AllOption;
+            }
+
+            if (ModuleFilter is null || !ModuleOptions.Contains(ModuleFilter))
+            {
+                ModuleFilter = AllOption;
+            }
+        }
+        finally
+        {
+            _updatingColumnOptions = false;
+        }
+    }
 
     partial void OnShowSameTextChanged(bool value) => ApplyRowFilter();
 
@@ -361,6 +442,7 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
     private void ShowComparison(EarComparison result, EarDiffEntry? previousRow)
     {
         Comparison = result;
+        UpdateColumnOptions(result);
         RebuildRows(previousRow is null ? null : result.Entries.FirstOrDefault(e => e.Path == previousRow.Path));
     }
 
@@ -767,6 +849,8 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
         }
 
         var search = SearchText.Trim();
+        var type = TypeFilter is AllOption or null ? null : TypeFilter;
+        var module = ModuleFilter is AllOption or null ? null : ModuleFilter;
         var rows = new List<EarDiffRow>();
         var sameTextCount = 0;
         EarDiffRow? kept = null;
@@ -782,6 +866,8 @@ public sealed partial class EarDiffViewModel : ObservableObject, IPage, IDisposa
             if (!ShowsStatus(e.Status)
                 || (!ShowArchives && e.IsArchive)
                 || (search.Length > 0 && !e.Path.Contains(search, StringComparison.OrdinalIgnoreCase))
+                || (type is not null && (e.IsArchive || TypeOf(e.Path) != type))
+                || (module is not null && ModuleOf(e.Path) != module)
                 || (isSameText && !ShowSameText && !isKept)) // the open file stays listed, so it never vanishes from under the user
             {
                 continue;

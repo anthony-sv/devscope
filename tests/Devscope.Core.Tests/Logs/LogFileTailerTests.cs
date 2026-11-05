@@ -42,6 +42,85 @@ public sealed class LogFileTailerTests : IDisposable
     }
 
     [Fact]
+    public async Task PollAsync_StackTraceWrittenAfterHeaderWasFlushed_RevisesTheSameEvent()
+    {
+        // The logger writes the header line, the file goes quiet (so the event is flushed), then the trace follows.
+        var path = _temp.WriteFile("app.log", "2026-10-16 10:00:01,000 ERROR boom\n");
+        var tailer = CreateTailer(path);
+        var first = Assert.Single(await PollUntilQuietAsync(tailer));
+
+        await File.AppendAllTextAsync(path,
+            "java.lang.IllegalStateException: bad\n\tat com.acme.Foo.bar(Foo.java:42)\n2026-10-16 10:00:02,000 INFO  next\n",
+            TestContext.Current.CancellationToken);
+        var second = await PollUntilQuietAsync(tailer);
+
+        Assert.Equal(2, second.Count);
+        var revised = second[0];
+        Assert.True(revised.IsRevision);
+        Assert.Equal(first.Id, revised.Id);
+        Assert.Equal(first.SortTime, revised.SortTime);
+        Assert.Equal(3, revised.LineCount);
+        Assert.Equal(LogSeverity.Error, revised.Severity);
+        Assert.EndsWith("\tat com.acme.Foo.bar(Foo.java:42)", revised.Text, StringComparison.Ordinal);
+        Assert.False(second[1].IsRevision);
+        Assert.Equal("2026-10-16 10:00:02,000 INFO  next", second[1].Text);
+    }
+
+    [Fact]
+    public async Task PollAsync_TraceArrivingInSeveralWrites_KeepsRevisingOneEvent()
+    {
+        var path = _temp.WriteFile("app.log", "2026-10-16 10:00:01,000 ERROR boom\n");
+        var tailer = CreateTailer(path);
+        var first = Assert.Single(await PollUntilQuietAsync(tailer));
+
+        await File.AppendAllTextAsync(path, "java.lang.IllegalStateException: bad\n", TestContext.Current.CancellationToken);
+        var second = Assert.Single(await PollUntilQuietAsync(tailer));
+        await File.AppendAllTextAsync(path, "\tat com.acme.Foo.bar(Foo.java:42)\n", TestContext.Current.CancellationToken);
+        var third = Assert.Single(await PollUntilQuietAsync(tailer));
+
+        Assert.Equal(first.Id, third.Id);
+        Assert.Equal(1, second.Revision);
+        Assert.Equal(2, third.Revision);
+        Assert.Equal(3, third.LineCount);
+    }
+
+    [Fact]
+    public async Task PollAsync_UntimedFileAfterFlush_PlainLineStartsNewEvent()
+    {
+        var path = _temp.WriteFile("app.out", "first line\n");
+        var tailer = CreateTailer(path);
+        await PollUntilQuietAsync(tailer);
+
+        await File.AppendAllTextAsync(path, "second line\n    indented continuation\n", TestContext.Current.CancellationToken);
+        var entries = await PollUntilQuietAsync(tailer);
+
+        var entry = Assert.Single(entries);
+        Assert.False(entry.IsRevision);
+        Assert.Equal("second line\n    indented continuation", entry.Text);
+    }
+
+    [Fact]
+    public void CollapseRevisions_KeepsNewestRevisionInPlaceOfTheOriginal()
+    {
+        var path = _temp.WriteFile("app.log", string.Empty);
+        var assembler = new LogEntryAssembler(new LogFileSource("test", path, 0), new DateOnly(2026, 10, 16), () => Interlocked.Increment(ref _id));
+        var output = new List<LogEntry>();
+        assembler.Add("2026-10-16 10:00:01,000 ERROR boom", output);
+        assembler.Flush(output);
+        assembler.Add("\tat a.B.c(B.java:1)", output);
+        assembler.Flush(output);
+        assembler.Add("2026-10-16 10:00:02,000 INFO next", output);
+        assembler.Flush(output);
+
+        var collapsed = LogSession.CollapseRevisions(output);
+
+        Assert.Equal(3, output.Count);
+        Assert.Equal(2, collapsed.Count);
+        Assert.Equal(2, collapsed[0].LineCount);
+        Assert.Equal("2026-10-16 10:00:02,000 INFO next", collapsed[1].Text);
+    }
+
+    [Fact]
     public async Task PollAsync_AppendedLines_AreReadIncrementally()
     {
         var path = _temp.WriteFile("app.log", "2026-10-16 10:00:00 INFO one\n");

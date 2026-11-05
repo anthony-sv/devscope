@@ -139,6 +139,12 @@
       </Button>
       <TextBox DockPanel.Dock="Right" Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged, Delay=150}" Width="300"
                AutomationProperties.Name="Filter paths" ToolTip="Filter by path" />
+      <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding ModuleOptions}" SelectedItem="{Binding ModuleFilter}" Width="180" Margin="0,0,8,0"
+                AutomationProperties.Name="Module filter" ToolTip="Only files inside this WAR/JAR of the EAR" />
+      <TextBlock DockPanel.Dock="Right" Text="Module" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="0,0,6,0" FontSize="12" />
+      <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding TypeOptions}" SelectedItem="{Binding TypeFilter}" Width="110" Margin="0,0,8,0"
+                AutomationProperties.Name="Type filter" ToolTip="Only files with this extension (.class, .xml, .properties…)" />
+      <TextBlock DockPanel.Dock="Right" Text="Type" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="12,0,6,0" FontSize="12" />
       <WrapPanel VerticalAlignment="Center">
         <ToggleButton Style="{StaticResource Chip}" IsChecked="{Binding ShowModified}" AutomationProperties.Name="Modified"
                       ToolTip="Files whose content changed">
