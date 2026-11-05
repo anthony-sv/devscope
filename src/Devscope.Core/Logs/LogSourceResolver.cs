@@ -8,6 +8,21 @@ public static class LogSourceResolver
 {
     private static readonly string[] CompressedExtensions = [".gz", ".zip", ".7z", ".bz2", ".xz", ".tar"];
 
+    /// <summary>The full path a source points at, with environment variables expanded.</summary>
+    public static string GetRoot(WorkspaceSource source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        var path = Environment.ExpandEnvironmentVariables(source.Path.Trim().Trim('"'));
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return path;
+        }
+    }
+
     /// <summary>Lists matching files, newest first, capped at <paramref name="maxFiles"/>.</summary>
     /// <exception cref="DirectoryNotFoundException">The path is neither an existing file nor a folder.</exception>
     public static IReadOnlyList<string> Resolve(WorkspaceSource source, int maxFiles)

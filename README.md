@@ -22,15 +22,18 @@ Everything runs locally. Files are read in place from local disks or `\\server\s
 - **Identical text is kept out of the way**: a file whose bytes differ only in line endings, a byte order mark or compiler output (e.g. a class recompiled after a comment moved) is still Modified, but hidden from the list by default. A hint says how many there are, and one click (or the ⋯ menu) lists them with a "same text" tag. Their diff says what differs.
 - **Single click previews, double click opens**: the preview sits next to the list, and double-click (or Enter) opens the file in a separate diff window with editor-style tabs (Ctrl+W closes one). The previewed row stays clearly marked (fill, bar and an eye icon) even while you read the diff.
 - **Zoom** the diff text with Ctrl+mouse wheel or Ctrl+plus/minus (Ctrl+0 resets); it applies to the preview and every tab, and is remembered.
-- Filter by status chips (Modified, Added, Removed, Unchanged) and by path, sort by any column, export the differences to CSV. You can drag and drop files onto the path boxes.
+- Filter by status chips (Modified, Added, Removed, Unchanged), by path, by **type** (extension, e.g. `.class` or `.xml`) and by **module** (the WAR/JAR a file sits in), sort by any column, export the differences to CSV. You can drag and drop files onto the path boxes.
 
 ### Logs
 - **Workspaces**: one per app, with environments such as `local`, `test`, `beta-1`, `beta-2`, `prod-1` and `prod-2`. Each environment has one or more paths (a file, or a folder searched recursively with patterns like `*.log;*.txt`). "Duplicate" makes adding cluster nodes quick, and "Test paths" checks that every share is reachable.
 - **Quick open**: any file or folder, without saving a workspace.
-- All files are **merged by timestamp**. Multi-line events such as stack traces are grouped into one row.
+- All files are **merged by timestamp**. Multi-line events such as stack traces are grouped into one row. A stack trace written a moment after its header line (a separate write, or a later poll) is still added to that event rather than showing up as stray `at …` rows, and the event updates in place.
+- **Files tree**: every file being read, grouped by environment, source and subfolder (`SubFolder1/X.log`, `SubFolder1/Y.log`, `SubFolder2/G.log`), with event and error counts. Untick files or folders to hide their events; right-click for "Show only this".
+- **Open an event** (double-click, Enter, or the button on the detail pane) in a window of its own showing the whole stack trace, with copy and line wrap. It keeps updating if more lines of the event arrive.
 - Formats detected automatically: ISO-8601/log4j/logback/Serilog, Tomcat, WebSphere `SystemOut.log`, `level=` / JSON `"level"`, and time-only formats.
 - **Live tail** (like `tail -F`): handles rotation and truncation. Files are opened only during each poll, with full sharing, so the writing app is never blocked. Follow and pause are supported.
 - Filters: text or regex search (regex runs on the non-backtracking engine, so it's safe), exclude, severity chips and environment chips, each with counts.
+- **Column filters** in the list header: time range (`10:30`, `2026-10-16 10:30`, `2026-10-16`, or relative `-15m` / `-2h` / `-1d`), minimum level, source (environment or path text), message (first line), and "Stack traces" to show only multi-line events.
 - **Colours**: tinted rows by severity, search hits highlighted, and per-workspace highlight rules (text or regex → colour).
 - On start it reads only the last 4 MB of each file and the newest 50 files per path. Both limits can be changed in **Settings**.
 

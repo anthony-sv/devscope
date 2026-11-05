@@ -61,3 +61,9 @@ public sealed partial class FilterChipViewModel<T>(T value, string label, int co
 
 /// <summary>A colour applied to every match of <see cref="Regex"/> in the log list.</summary>
 public sealed record HighlightSpec(Regex Regex, string Color, bool IsSearch);
+
+/// <summary>A choice of the Level column filter: events at <see cref="Minimum"/> or above.</summary>
+public sealed record LevelOption(string Label, LogSeverity Minimum)
+{
+    public override string ToString() => Label;
+}

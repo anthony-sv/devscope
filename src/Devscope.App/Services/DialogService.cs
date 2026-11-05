@@ -28,6 +28,11 @@ public interface IDialogService
 
     /// <summary>Shows the diff window with the EAR diff's open tabs, or brings it to the front when already open.</summary>
     void ShowDiffWindow(EarDiffViewModel viewModel);
+
+    /// <summary>Opens a log event, with its whole stack trace, in a window of its own.</summary>
+    /// <param name="viewModel">The event.</param>
+    /// <param name="closed">Called when the window is closed.</param>
+    void ShowLogEvent(LogEventViewModel viewModel, Action closed);
 }
 
 public sealed class DialogService(IServiceProvider services) : IDialogService
@@ -82,6 +87,16 @@ public sealed class DialogService(IServiceProvider services) : IDialogService
         }
 
         window.Activate();
+    }
+
+    public void ShowLogEvent(LogEventViewModel viewModel, Action closed)
+    {
+        ArgumentNullException.ThrowIfNull(closed);
+
+        // Not modal, so several events can be compared side by side while the list keeps tailing.
+        var window = new LogEventWindow { DataContext = viewModel, Owner = Owner };
+        window.Closed += (_, _) => closed();
+        window.Show();
     }
 
     private static Window Owner => Application.Current.MainWindow;

@@ -26,10 +26,25 @@ public sealed record LogSessionOptions
 /// <summary>An environment chosen for viewing, with its sources.</summary>
 public sealed record EnvironmentSelection(string Name, IReadOnlyList<WorkspaceSource> Sources, int ColorIndex);
 
-/// <summary>Reachability of one configured source.</summary>
-public sealed record SourceStatus(string Environment, string Path, int FileCount, string? Error);
+/// <summary>Reachability of one configured source, and the files being read from it.</summary>
+/// <param name="Environment">Environment name.</param>
+/// <param name="Path">The path as configured.</param>
+/// <param name="FileCount">Number of matching files found by the last discovery.</param>
+/// <param name="Error">Why the source could not be read, or null.</param>
+/// <param name="Root">Full path of the source (environment variables expanded); files are listed relative to it.</param>
+/// <param name="Files">Every file read from this source so far, full paths.</param>
+public sealed record SourceStatus(string Environment, string Path, int FileCount, string? Error, string Root, IReadOnlyList<string> Files)
+{
+    public SourceStatus(string environment, string path, int fileCount, string? error)
+        : this(environment, path, fileCount, error, path, [])
+    {
+    }
+}
 
-/// <summary>New entries (sorted by time) and, after each discovery, the current source statuses.</summary>
+/// <summary>
+/// New entries (sorted by time) and, after each discovery, the current source statuses.
+/// An entry with <see cref="LogEntry.IsRevision"/> set replaces an earlier entry with the same id (its event got more lines).
+/// </summary>
 public sealed record LogBatch(IReadOnlyList<LogEntry> Entries, bool IsInitial, IReadOnlyList<SourceStatus>? Statuses);
 
 /// <summary>Creates log sessions; allows the UI to be tested without touching the file system.</summary>
@@ -56,6 +71,7 @@ public sealed partial class LogSession : IAsyncDisposable
     private readonly LogSessionOptions _options;
     private readonly ILogger<LogSession> _logger;
     private readonly Dictionary<string, LogFileTailer> _tailers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<(string Environment, string Path), SortedSet<string>> _filesBySource = [];
     private readonly Channel<LogBatch> _channel = Channel.CreateUnbounded<LogBatch>(new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
     private readonly CancellationTokenSource _cts = new();
     private Task? _loop;
@@ -103,6 +119,7 @@ public sealed partial class LogSession : IAsyncDisposable
             // A second, immediate poll flushes each file's last buffered event, so the initial view is complete and sorted.
             var initial = await PollAllAsync(cancellationToken).ConfigureAwait(false);
             initial.AddRange(await PollAllAsync(cancellationToken).ConfigureAwait(false));
+            initial = CollapseRevisions(initial);
             initial.Sort(LogEntry.CompareByTime);
             await _channel.Writer.WriteAsync(new LogBatch(initial, IsInitial: true, statuses), cancellationToken).ConfigureAwait(false);
 
@@ -157,7 +174,18 @@ public sealed partial class LogSession : IAsyncDisposable
                             () => Interlocked.Increment(ref _nextId));
                     }
 
-                    statuses.Add(new SourceStatus(environment.Name, source.Path, files.Count, files.Count == 0 ? "No matching files" : null));
+                    // Files that dropped out of the newest N are still being followed, so they stay listed.
+                    var key = (environment.Name, source.Path);
+                    if (!_filesBySource.TryGetValue(key, out var known))
+                    {
+                        known = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+                        _filesBySource[key] = known;
+                    }
+
+                    known.UnionWith(files);
+                    statuses.Add(new SourceStatus(
+                        environment.Name, source.Path, files.Count, files.Count == 0 ? "No matching files" : null,
+                        LogSourceResolver.GetRoot(source), [.. known]));
                 }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
                 {
@@ -177,9 +205,38 @@ public sealed partial class LogSession : IAsyncDisposable
             new ParallelOptions { MaxDegreeOfParallelism = _options.MaxConcurrentReads, CancellationToken = cancellationToken },
             async (tailer, ct) => results.Add(await tailer.PollAsync(ct).ConfigureAwait(false))).ConfigureAwait(false);
 
-        var entries = results.SelectMany(r => r).ToList();
+        var entries = CollapseRevisions(results.SelectMany(r => r).ToList());
         entries.Sort(LogEntry.CompareByTime);
         return entries;
+    }
+
+    /// <summary>Keeps only the newest revision of each event; it takes the place of the first one.</summary>
+    internal static List<LogEntry> CollapseRevisions(List<LogEntry> entries)
+    {
+        if (!entries.Exists(e => e.IsRevision))
+        {
+            return entries;
+        }
+
+        var indexById = new Dictionary<long, int>();
+        var result = new List<LogEntry>(entries.Count);
+        foreach (var entry in entries)
+        {
+            if (indexById.TryGetValue(entry.Id, out var index))
+            {
+                if (entry.Revision > result[index].Revision)
+                {
+                    result[index] = entry;
+                }
+            }
+            else
+            {
+                indexById[entry.Id] = result.Count;
+                result.Add(entry);
+            }
+        }
+
+        return result;
     }
 
     [LoggerMessage(Level = LogLevel.Error, Message = "Log session stopped unexpectedly")]
